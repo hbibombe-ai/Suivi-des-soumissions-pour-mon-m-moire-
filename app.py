@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 import kobo
+import theme
 import viz
 
 st.set_page_config(page_title="Diarrhée < 5 ans — ZS Limete", page_icon="💧",
@@ -39,22 +40,31 @@ def secret(cle: str, defaut: str = "") -> str:
 
 # ------------------------------------------------------------------ barre latérale
 with st.sidebar:
+    st.markdown('<div class="marque"><span class="ico">💧</span>'
+                '<span class="txt">Enquête diarrhée &lt; 5 ans<em>ZS de Limete · Kinshasa · 2026</em></span></div>',
+                unsafe_allow_html=True)
+
+    st.markdown("### Affichage")
+    demo = st.toggle("Mode démonstration", value=not secret("token"),
+                     help="Données fictives, pour présenter le tableau de bord avant la collecte.")
+
     st.markdown("### Connexion KoboToolbox")
-    demo = st.toggle("Mode démonstration (données fictives)", value=not secret("token"),
-                     help="Permet de visualiser le tableau de bord avant le début de la collecte.")
-    serveur_nom = st.selectbox("Serveur", list(kobo.SERVEURS), index=0)
-    serveur = kobo.SERVEURS[serveur_nom]
-    token = st.text_input("Jeton d'API (token)", value=secret("token"), type="password",
-                          help="KoboToolbox → Compte → Sécurité → Jeton d'API.")
-    uid = st.text_input("Identifiant du formulaire (asset UID)", value=secret("asset_uid"),
-                        help="Visible dans l'URL du projet : /forms/<asset_uid>/")
-    col_a, col_b = st.columns(2)
-    if col_a.button("Actualiser", width="stretch"):
+    with st.expander("Paramètres de connexion", expanded=not bool(secret("token"))):
+        serveur_nom = st.selectbox("Serveur", list(kobo.SERVEURS), index=0)
+        serveur = kobo.SERVEURS[serveur_nom]
+        token = st.text_input("Jeton d'API", value=secret("token"), type="password",
+                              help="KoboToolbox → Paramètres du compte → Sécurité → Jeton d'API.")
+        uid = st.text_input("Identifiant du formulaire", value=secret("asset_uid"),
+                            help="Visible dans l'URL du projet : /forms/<asset_uid>/")
+    if st.button("Actualiser les données", width="stretch", type="primary"):
         st.cache_data.clear()
         st.session_state["maj"] = dt.datetime.now()
-    sombre = col_b.toggle("Thème sombre", value=False)
-    st.divider()
+    st.caption(f"Dernière lecture : {st.session_state.get('maj', dt.datetime.now()):%d/%m/%Y %H:%M}")
+    st.caption("Mode sombre : `base = \"dark\"` dans .streamlit/config.toml.")
 
+# Le mode clair/sombre vient de .streamlit/config.toml (theme.base) : interface,
+# widgets et graphiques restent ainsi parfaitement cohérents.
+sombre = (st.get_option("theme.base") or "light").lower() == "dark"
 p = viz.palette(sombre)
 dico = dictionnaire()
 
@@ -72,39 +82,51 @@ else:
 
 df = kobo.preparer(brut, dico) if not brut.empty else pd.DataFrame()
 
-st.markdown(f"## {TITRE}")
-st.caption(SOUS_TITRE)
+theme.appliquer(sombre)
 
 if erreur:
     st.error(f"Connexion impossible : {erreur}")
 if df.empty:
+    theme.entete(TITRE, SOUS_TITRE, [("Source", "En attente de connexion", "alerte")])
     st.info("Renseigner le jeton d'API et l'identifiant du formulaire dans la barre latérale, "
             "ou activer le mode démonstration pour explorer le tableau de bord.")
     st.stop()
-if demo:
-    st.warning("**Mode démonstration** : les données affichées sont simulées, elles ne proviennent pas de la collecte.")
+
+chips = [("Fiches", f"{len(df)}", ""),
+         ("Dernière donnée",
+          f"{max([j for j in df['jour'].dropna()]):%d/%m/%Y}" if df["jour"].notna().any() else "—", ""),
+         ("Aires couvertes", f"{df['a3'].nunique() if 'a3' in df else 0} / 11", ""),
+         ("Source", "Démonstration — données fictives" if demo else "KoboToolbox — lecture directe",
+          "alerte" if demo else "direct")]
+theme.entete(TITRE, SOUS_TITRE, chips)
 
 # ------------------------------------------------------------------------ filtres
-with st.sidebar:
-    st.markdown("### Filtres")
-    jours = sorted([j for j in df["jour"].dropna().unique()])
-    if jours:
-        d1, d2 = st.select_slider("Période de collecte", options=jours,
-                                  value=(jours[0], jours[-1]), format_func=lambda d: d.strftime("%d/%m"))
-        df = df[(df["jour"] >= d1) & (df["jour"] <= d2)]
-    aires = sorted(df["aire_sante"].dropna().unique()) if "aire_sante" in df else []
-    sel_aires = st.multiselect("Aires de santé", aires, default=aires)
-    if sel_aires:
-        df = df[df["aire_sante"].isin(sel_aires)]
-    sexes = sorted(df["sexe"].dropna().unique()) if "sexe" in df else []
-    sel_sexe = st.multiselect("Sexe de l'enfant", sexes, default=sexes)
-    if sel_sexe:
-        df = df[df["sexe"].isin(sel_sexe)]
-    tranches = [t[2] for t in kobo.TRANCHES if t[2] in set(df.get("tranche_age", []))]
-    sel_tr = st.multiselect("Tranche d'âge", tranches, default=tranches)
-    if sel_tr:
-        df = df[df["tranche_age"].isin(sel_tr)]
-    st.caption(f"{len(df)} fiche(s) après filtrage — mise à jour automatique toutes les 5 minutes.")
+st.markdown('<div class="filtre-titre">Filtres</div>', unsafe_allow_html=True)
+f1, f2, f3, f4 = st.columns([1.6, 2.2, 1.1, 1.6])
+jours = sorted([j for j in df["jour"].dropna().unique()])
+if jours:
+    periode = f1.date_input("Période de collecte", value=(jours[0], jours[-1]),
+                            min_value=jours[0], max_value=jours[-1], format="DD/MM/YYYY")
+    if isinstance(periode, (list, tuple)) and len(periode) == 2:
+        df = df[(df["jour"] >= periode[0]) & (df["jour"] <= periode[1])]
+
+aires = sorted(df["aire_sante"].dropna().unique()) if "aire_sante" in df else []
+sel_aires = f2.multiselect("Aires de santé", aires, placeholder=f"Toutes les aires ({len(aires)})")
+if sel_aires:
+    df = df[df["aire_sante"].isin(sel_aires)]
+
+sexes = sorted(df["sexe"].dropna().unique()) if "sexe" in df else []
+sel_sexe = f3.multiselect("Sexe de l'enfant", sexes, placeholder="Les deux")
+if sel_sexe:
+    df = df[df["sexe"].isin(sel_sexe)]
+
+tranches = [t[2] for t in kobo.TRANCHES if t[2] in set(df.get("tranche_age", []))]
+sel_tr = f4.multiselect("Tranche d'âge", tranches, placeholder="Toutes les tranches")
+if sel_tr:
+    df = df[df["tranche_age"].isin(sel_tr)]
+
+st.markdown(f'<div class="pdp">{len(df)} fiche(s) sélectionnée(s) · actualisation automatique '
+            "toutes les 5 minutes · bouton « Actualiser » pour forcer la lecture.</div>", unsafe_allow_html=True)
 
 if df.empty:
     st.warning("Aucune fiche ne correspond aux filtres sélectionnés.")
@@ -134,26 +156,18 @@ zinc, _ = part("k3")
 sro_zinc = float(((d.get("k2") == 1) & (d.get("k3") == 1)).mean()) if len(d) else 0.0
 recours, _ = part("k7")
 
-CARTE = """
-<div style="background:{panel};border:1px solid {grid};border-top:3px solid {accent};
-border-radius:10px;padding:12px 14px;">
-  <div style="font-size:12px;color:{text2};font-weight:600;letter-spacing:.02em">{titre}</div>
-  <div style="font-size:26px;font-weight:700;color:{accent};line-height:1.25">{valeur}</div>
-  <div style="font-size:11px;color:{muted}">{note}</div>
-</div>"""
-
 def carte(col, titre, valeur, note, accent=None):
-    col.markdown(CARTE.format(panel=p["panel"], grid=p["grid"], text2=p["text2"], muted=p["muted"],
-                              accent=accent or p["series"][0], titre=titre, valeur=valeur, note=note),
-                 unsafe_allow_html=True)
+    theme.carte(col, titre, valeur, note, accent or p["series"][0])
 
-c = st.columns(6)
+theme.section("Indicateurs clés", "Proportions calculées sur les fiches sélectionnées, avec intervalle de confiance à 95 %.")
+c = st.columns(6, gap="small")
 carte(c[0], "Fiches éligibles", f"{n_tot}", f"{df['a3'].nunique() if 'a3' in df else 0} aire(s) de santé")
-carte(c[1], "Prévalence diarrhée (14 j)", f"{prev*100:.1f} %", f"IC 95 % : {prev_b*100:.1f} – {prev_h*100:.1f} %", p["series"][1])
+carte(c[1], "Prévalence diarrhée (14 j)", f"{viz.fr(prev*100)} %",
+      f"IC 95 % : {viz.fr(prev_b*100)} – {viz.fr(prev_h*100)} %", p["series"][1])
 carte(c[2], "Cas de diarrhée", f"{len(d)}", "enfants concernés")
-carte(c[3], "SRO", f"{sro*100:.0f} %", f"des {n_d} cas", p["good"])
-carte(c[4], "SRO + zinc", f"{sro_zinc*100:.0f} %", "prise en charge complète", p["good"])
-carte(c[5], "Recours aux soins", f"{recours*100:.0f} %", "hors domicile", p["series"][0])
+carte(c[3], "SRO", f"{viz.fr(sro*100, 0)} %", f"des {n_d} cas", p["good"])
+carte(c[4], "SRO + zinc", f"{viz.fr(sro_zinc*100, 0)} %", "prise en charge complète", p["good"])
+carte(c[5], "Recours aux soins", f"{viz.fr(recours*100, 0)} %", "hors domicile", p["series"][0])
 st.write("")
 
 onglets = st.tabs(["Suivi de la collecte", "Profil épidémiologique", "Facteurs associés",
@@ -308,10 +322,10 @@ with onglets[4]:
                        xtitre="Score sur 8"), width="stretch")
         moy = df["score_connaissances"].mean()
         bon = (df["score_connaissances"] >= 6).mean()
-        b.metric("Score moyen", f"{moy:.1f} / 8")
-        b.metric("Score ≥ 6/8", f"{bon*100:.0f} %")
+        b.metric("Score moyen", f"{viz.fr(moy)} / 8")
+        b.metric("Score ≥ 6/8", f"{viz.fr(bon*100, 0)} %")
         if "nb_signes_danger" in df:
-            b.metric("Signes de danger cités (moyenne)", f"{df['nb_signes_danger'].mean():.1f}")
+            b.metric("Signes de danger cités (moyenne)", viz.fr(df['nb_signes_danger'].mean()))
         if "niveau_etudes" in df:
             par = df.groupby("niveau_etudes")["score_connaissances"].mean().sort_values(ascending=False)
             v = (par / 8).tolist()

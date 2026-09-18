@@ -11,8 +11,8 @@ LIGHT = dict(
     good="#008300", warn="#eda100", bad="#e34948",
 )
 DARK = dict(
-    surface="#1a1a19", panel="#222220", text="#ffffff", text2="#c3c2b7", muted="#8f8e86",
-    grid="#3a3a37", series=["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
+    surface="#0e1117", panel="#1a1d24", text="#fafafa", text2="#c2c6cf", muted="#8b909a",
+    grid="#2b303a", series=["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"],
     ordinal=["#184f95", "#3987e5", "#86b6ef"],
     good="#4caf50", warn="#c98500", bad="#e66767",
 )
@@ -102,6 +102,7 @@ def barres_temps(x, y, titre, p, couleur=None, ytitre=""):
     fig = go.Figure(go.Bar(x=x, y=y, marker=dict(color=couleur, line=dict(width=2, color=p["surface"])),
                            hovertemplate="%{x|%d/%m/%Y}<br>%{y} fiche(s)<extra></extra>"))
     fig.update_layout(**layout(p, height=300, title=dict(text=titre, font=dict(size=15, color=p["text"]), x=0, xanchor="left")))
+    fig.update_xaxes(tickformat="%d/%m")
     fig.update_yaxes(title=ytitre)
     return fig
 
@@ -112,6 +113,7 @@ def courbe_cumul(x, y, titre, p):
                                hovertemplate="%{x|%d/%m/%Y}<br>Cumul : %{y}<extra></extra>"))
     fig.update_layout(**layout(p, height=300, hovermode="x unified",
                                title=dict(text=titre, font=dict(size=15, color=p["text"]), x=0, xanchor="left")))
+    fig.update_xaxes(tickformat="%d/%m")
     return fig
 
 def barres_empilees(categories, series, titre, p):

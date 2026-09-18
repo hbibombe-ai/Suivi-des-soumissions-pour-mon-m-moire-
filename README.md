@@ -9,6 +9,7 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | Fichier | Rôle |
 |---|---|
 | `app.py` | Application Streamlit (interface, filtres, onglets) |
+| `theme.py` | Habillage : bandeau de titre, cartes d'indicateurs, onglets, listes déroulantes |
 | `kobo.py` | Connexion à l'API KoboToolbox, dictionnaire des variables, préparation des données |
 | `viz.py` | Thème graphique, intervalles de confiance, ratios de prévalence, graphiques |
 | `KoboCollect_XLSForm_Diarrhee_Limete_2026_V3.xlsx` | Le formulaire : sert de dictionnaire (codes → libellés) |
@@ -54,15 +55,25 @@ Pour restreindre l'accès : Streamlit Cloud permet de limiter l'application à d
 - **Connaissances** : distribution du score sur 8, score moyen, score selon le niveau d'études du répondant.
 - **Données** : tableau filtrable et export Excel ou CSV des données filtrées.
 
-## 6. Notes méthodologiques
+## 6. Apparence
+
+L'interface suit le thème défini dans `.streamlit/config.toml` :
+
+- **mode clair** : configuration livrée par défaut ;
+- **mode sombre** : remplacer le bloc `[theme]` par le bloc commenté juste en dessous dans ce fichier.
+
+Interface, listes déroulantes, tableaux et graphiques basculent ensemble. Sur Streamlit Cloud,
+il suffit de modifier le fichier : l'application se redéploie automatiquement.
+
+## 7. Notes méthodologiques
 
 - Les proportions sont accompagnées d'un **intervalle de confiance à 95 % (méthode de Wilson)**, adapté aux petits effectifs.
 - Les **ratios de prévalence** sont bruts, non ajustés (IC selon la méthode de Katz) : ils servent à explorer les données pendant la collecte, pas à conclure. L'analyse finale passe par la régression prévue au protocole.
 - Seules les fiches avec `eligible = 1` (consentement, résidence et enfant éligible) sont retenues.
 - Les données sont mises en cache **5 minutes** ; le bouton *Actualiser* force la relecture.
 
-## 7. Adapter le tableau de bord
+## 8. Adapter le tableau de bord
 
 - Le formulaire évolue ? Remplacer le fichier XLSForm du dépôt : les libellés des questions et des modalités suivent automatiquement.
 - Ajouter un indicateur : le calculer dans `kobo.preparer()`, puis l'afficher dans l'onglet voulu de `app.py`.
-- La palette de couleurs (mode clair et sombre) est centralisée dans `viz.py`.
+- La palette de couleurs (modes clair et sombre) est dans `viz.py` ; l'habillage de l'interface dans `theme.py`.

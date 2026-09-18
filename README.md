@@ -15,21 +15,43 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | `KoboCollect_XLSForm_Diarrhee_Limete_2026_V3.xlsx` | Le formulaire : sert de dictionnaire (codes → libellés) |
 | `requirements.txt` | Dépendances Python |
 | `.streamlit/config.toml` | Thème de l'interface |
-| `.streamlit/secrets.toml.example` | Modèle de configuration des accès |
+| `.streamlit/secrets.toml.example` | Modèle de configuration des accès (Streamlit Cloud) |
+| `config_kobo.py` | Connexion enregistrée une fois pour toutes (usage local) — jamais sur GitHub |
 
 ## 2. Obtenir les paramètres de connexion
 
 1. **Jeton d'API** : KoboToolbox → votre compte (en haut à droite) → **Paramètres du compte** → **Sécurité** → *Jeton d'API*. Copier la chaîne affichée.
 2. **Identifiant du formulaire (asset UID)** : ouvrir le projet ; l'URL contient `/forms/aXXXXXXXXXXXX/` — c'est cet identifiant.
-3. **Serveur** : `https://eu.kobotoolbox.org` (serveur européen, celui de vos projets récents) ou `https://kf.kobotoolbox.org`.
+3. **Serveur** : `https://eu.kobotoolbox.org` (serveur européen) ou `https://kf.kobotoolbox.org`.
 
 Le compte utilisé doit avoir au minimum le droit **« Voir les soumissions »** sur le projet.
+
+### Enregistrer la connexion une fois pour toutes
+
+Le tableau de bord lit les paramètres dans cet ordre, et n'affiche les champs de saisie
+que s'il ne trouve rien :
+
+| Où | Quand l'utiliser |
+|---|---|
+| **Secrets de Streamlit Cloud** | application en ligne — voir section 4 |
+| **`config_kobo.py`** | sur votre ordinateur : ouvrir le fichier, coller le jeton et l'identifiant, enregistrer |
+| **Variables d'environnement** `KOBO_TOKEN`, `KOBO_ASSET_UID`, `KOBO_SERVER` | serveur ou poste partagé |
+
+Une fois l'un de ces trois moyens renseigné, la connexion est automatique à chaque
+ouverture ; la barre latérale affiche simplement « Connecté » et un volet repliable
+permet de changer ponctuellement de projet.
+
+> **Sécurité.** Le jeton donne accès à *tout* votre compte KoboToolbox, y compris aux
+> données nominatives des ménages enquêtés. Il ne doit donc jamais être écrit dans un
+> fichier publié sur GitHub : `config_kobo.py` et `.streamlit/secrets.toml` sont pour
+> cette raison listés dans `.gitignore`. Si un jeton a été exposé par erreur, le
+> régénérer immédiatement dans KoboToolbox (l'ancien cesse alors de fonctionner).
 
 ## 3. Utilisation en local
 
 ```bash
 pip install -r requirements.txt
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml   # puis renseigner le jeton
+# ouvrir config_kobo.py et y coller le jeton d'API et l'identifiant du formulaire
 streamlit run app.py
 ```
 

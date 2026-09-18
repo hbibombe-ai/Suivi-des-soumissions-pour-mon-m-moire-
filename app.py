@@ -6,6 +6,7 @@ Lancement local :  streamlit run app.py
 from __future__ import annotations
 import datetime as dt
 import io
+import os
 
 import pandas as pd
 import streamlit as st
@@ -31,11 +32,24 @@ def dictionnaire() -> dict:
     return kobo.charger_dictionnaire()
 
 
-def secret(cle: str, defaut: str = "") -> str:
+def parametre(cle: str, defaut: str = "") -> str:
+    """Cherche un paramètre dans l'ordre : secrets Streamlit → config_kobo.py → variable
+    d'environnement → valeur par défaut. Permet de ne rien saisir à chaque ouverture."""
     try:
-        return st.secrets["kobo"][cle]
-    except Exception:
-        return defaut
+        valeur = st.secrets["kobo"][cle]
+        if valeur:
+            return str(valeur)
+    except Exception:  # noqa: BLE001 — aucun fichier secrets.toml
+        pass
+    try:
+        import config_kobo
+        valeur = getattr(config_kobo, {"server": "SERVEUR", "token": "TOKEN",
+                                       "asset_uid": "ASSET_UID"}[cle], "")
+        if valeur:
+            return str(valeur)
+    except Exception:  # noqa: BLE001 — fichier absent ou incomplet
+        pass
+    return os.environ.get(f"KOBO_{cle.upper()}", defaut)
 
 
 # ------------------------------------------------------------------ barre latérale
@@ -45,17 +59,34 @@ with st.sidebar:
                 unsafe_allow_html=True)
 
     st.markdown("### Affichage")
-    demo = st.toggle("Mode démonstration", value=not secret("token"),
+    demo = st.toggle("Mode démonstration", value=not parametre("token"),
                      help="Données fictives, pour présenter le tableau de bord avant la collecte.")
 
     st.markdown("### Connexion KoboToolbox")
-    with st.expander("Paramètres de connexion", expanded=not bool(secret("token"))):
+    serveur = parametre("server", "https://eu.kobotoolbox.org")
+    token = parametre("token")
+    uid = parametre("asset_uid")
+    configure = bool(token and uid)
+
+    if configure:
+        st.success(f"Connecté · projet `{uid[:10]}…`\n\n{serveur.replace('https://', '')}", icon="✅")
+        with st.expander("Modifier la connexion (cette session)"):
+            serveur_nom = st.selectbox("Serveur", list(kobo.SERVEURS),
+                                       index=list(kobo.SERVEURS.values()).index(serveur)
+                                       if serveur in kobo.SERVEURS.values() else 0)
+            serveur = kobo.SERVEURS[serveur_nom]
+            token = st.text_input("Jeton d'API", value=token, type="password") or token
+            uid = st.text_input("Identifiant du formulaire", value=uid) or uid
+    else:
+        st.info("Renseigner `config_kobo.py` (en local) ou les Secrets de Streamlit Cloud "
+                "pour ne plus rien saisir à l'ouverture.", icon="🔑")
         serveur_nom = st.selectbox("Serveur", list(kobo.SERVEURS), index=0)
         serveur = kobo.SERVEURS[serveur_nom]
-        token = st.text_input("Jeton d'API", value=secret("token"), type="password",
+        token = st.text_input("Jeton d'API", value="", type="password",
                               help="KoboToolbox → Paramètres du compte → Sécurité → Jeton d'API.")
-        uid = st.text_input("Identifiant du formulaire", value=secret("asset_uid"),
+        uid = st.text_input("Identifiant du formulaire", value="",
                             help="Visible dans l'URL du projet : /forms/<asset_uid>/")
+
     if st.button("Actualiser les données", width="stretch", type="primary"):
         st.cache_data.clear()
         st.session_state["maj"] = dt.datetime.now()

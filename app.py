@@ -119,6 +119,31 @@ theme.appliquer(sombre)
 if erreur:
     st.error(f"Connexion impossible : {erreur}")
 if df.empty:
+    if not demo and token and uid and not erreur and brut.empty:
+        theme.entete(TITRE, SOUS_TITRE, [("Source", "Connecté — aucune fiche reçue", "alerte")])
+        st.warning(
+            "La connexion à KoboToolbox fonctionne, mais le projet ne renvoie **aucune fiche**. Causes possibles :\n\n"
+            "1. **Fiche non envoyée** : dans KoboCollect, une fiche « finalisée » reste sur le téléphone tant qu'on "
+            "n'a pas utilisé **Envoyer formulaire finalisé**. Vérifier qu'elle apparaît dans KoboToolbox → projet → *Données*.\n"
+            "2. **Test dans l'aperçu** : les réponses saisies dans l'aperçu (« Preview ») de KoboToolbox ne sont pas enregistrées.\n"
+            "3. **Mauvais projet** : l'identifiant du formulaire ne correspond pas au projet qui reçoit les fiches "
+            "(par exemple, la V7 déployée comme nouveau projet).\n"
+            "4. **Données mises en cache** : cliquer sur **Actualiser les données** après l'envoi.")
+        try:
+            info = kobo.tester_connexion(serveur, token, uid)
+            st.caption(f"Projet lu : « {info['nom']} » — {info['soumissions']} soumission(s) déclarée(s) par KoboToolbox.")
+        except Exception as e:  # noqa: BLE001
+            st.caption(f"Métadonnées du projet indisponibles : {e}")
+        st.stop()
+    if not brut.empty:
+        theme.entete(TITRE, SOUS_TITRE, [("Source", f"{len(brut)} fiche(s) reçue(s) — aucune éligible", "alerte")])
+        st.warning(f"KoboToolbox a renvoyé **{len(brut)} fiche(s)**, mais aucune n'est retenue : le tableau de bord "
+                   "n'affiche que les enfants **éligibles** (résidence dans la ZS de Limete depuis au moins 6 mois, "
+                   "enfant de 0 à 59 mois, consentement). Le détail ci-dessous indique le motif pour chaque fiche.")
+        st.dataframe(kobo.diagnostic(brut), hide_index=True, width="stretch")
+        with st.expander("Variables reçues de KoboToolbox (diagnostic technique)"):
+            st.write(sorted(kobo.aplatir(brut).columns.tolist()))
+        st.stop()
     theme.entete(TITRE, SOUS_TITRE, [("Source", "En attente de connexion", "alerte")])
     st.info("Renseigner le jeton d'API et l'identifiant du formulaire dans la barre latérale, "
             "ou activer le mode démonstration pour explorer le tableau de bord.")

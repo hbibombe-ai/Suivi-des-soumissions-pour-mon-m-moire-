@@ -89,7 +89,7 @@ def _lignes_desc(v: Var) -> List[dict]:
         s = v.serie.dropna().astype(str)
         n = len(s)
         for code, lab in v.ordre:
-            k = int(s.map(lambda x: code in x.split()).sum())
+            k = sum(1 for x in s if code in str(x).split())
             rows.append({"Variables / modalités": lab, "Effectif (n)": k,
                          "Pourcentage (%)": viz.fr(100 * k / n) if n else "–", "_niv": "m"})
         rows[0]["Variables / modalités"] += f" (n = {n}, réponses multiples)"

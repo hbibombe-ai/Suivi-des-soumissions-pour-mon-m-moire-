@@ -119,7 +119,8 @@ def _tranche(age) -> str:
 def _numeriser(df: pd.DataFrame) -> pd.DataFrame:
     """Convertit en nombres les colonnes dont (presque) toutes les valeurs sont numériques."""
     for c in df.columns:
-        if df[c].dtype == object and not c.startswith("_"):
+        if not c.startswith("_") and not pd.api.types.is_numeric_dtype(df[c]) \
+                and not pd.api.types.is_datetime64_any_dtype(df[c]):
             s = df[c].dropna()
             if len(s) and s.map(lambda v: isinstance(v, (int, float)) or str(v).replace(".", "", 1).lstrip("-").isdigit()).mean() >= 0.9:
                 df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -144,7 +145,7 @@ def participation(brut: pd.DataFrame) -> dict:
     g = lambda c: df[c] if c in df else pd.Series(np.nan, index=df.index)
     non_elig = (g("el1") == 0) | (g("el2") < 6) | (g("el3") == 0)
     refus = (~non_elig) & (g("el4") == 0)
-    enquetes = g("eligible") == 1
+    enquetes = eligibilite(df) == 1
     return {"soumises": len(df), "non_eligibles": int(non_elig.sum()), "refus": int(refus.sum()),
             "enquetes": int(enquetes.sum()),
             "detail_non_elig": {"Hors ZS de Limete": int((g("el1") == 0).sum()),
@@ -157,6 +158,10 @@ def preparer(brut: pd.DataFrame, dico: Dict[str, dict]) -> pd.DataFrame:
     if brut.empty:
         return brut
     df = aplatir(brut)
+    # colonnes absentes (questions non posées ou non encore renseignées) : ajoutées vides
+    manquantes = [v for v in dico if v not in df.columns]
+    if manquantes:
+        df = pd.concat([df, pd.DataFrame(np.nan, index=df.index, columns=manquantes)], axis=1)
 
     for c in ("_submission_time", "start", "end"):
         if c in df.columns:
@@ -218,9 +223,42 @@ def preparer(brut: pd.DataFrame, dico: Dict[str, dict]) -> pd.DataFrame:
         mesure = (oed == 1) | pb.notna()
         df["malnutrition_aigue_pb"] = np.where(mesure, ((oed == 1) | (pb < 125)).astype(float), np.nan)
 
-    if "eligible" in df.columns:
-        df = df[df["eligible"] == 1]
+    df["eligible"] = eligibilite(df)
+    df = df[df["eligible"] == 1]
     return df.reset_index(drop=True)
+
+
+def eligibilite(df: pd.DataFrame) -> pd.Series:
+    """Variable `eligible` du formulaire ; recalculée à partir de EL1–EL4 si elle manque ou est vide."""
+    g = lambda c: pd.to_numeric(df[c], errors="coerce") if c in df else pd.Series(np.nan, index=df.index)
+    calc = ((g("el1") == 1) & ((g("el2") >= 6) | g("el2").isna() & ("el2" not in df)) & (g("el3") == 1)
+            & (g("el4") == 1)).astype(int)
+    if "eligible" in df.columns:
+        return g("eligible").fillna(calc)
+    return calc
+
+
+def diagnostic(brut: pd.DataFrame) -> pd.DataFrame:
+    """Une ligne par fiche reçue : critères d'éligibilité et motif d'exclusion éventuel."""
+    df = aplatir(brut)
+    g = lambda c: pd.to_numeric(df[c], errors="coerce") if c in df else pd.Series(np.nan, index=df.index)
+    elig = eligibilite(df)
+    def motif(i):
+        if elig.iloc[i] == 1:
+            return "Retenue"
+        if g("el1").iloc[i] == 0: return "Ménage hors ZS de Limete (EL1 = Non)"
+        if g("el2").iloc[i] < 6: return "Résidence < 6 mois (EL2)"
+        if g("el3").iloc[i] == 0: return "Pas d'enfant de 0 à 59 mois (EL3 = Non)"
+        if g("el4").iloc[i] == 0: return "Consentement refusé (EL4 = Non)"
+        return "Critères d'éligibilité non renseignés"
+    out = pd.DataFrame({
+        "Fiche": df.get("_id", pd.Series(range(len(df)))).values,
+        "Envoyée le": pd.to_datetime(df.get("_submission_time"), errors="coerce").values if "_submission_time" in df else None,
+        "Version du formulaire": df.get("__version__", pd.Series("", index=df.index)).values,
+        "EL1": g("el1").values, "EL2 (mois)": g("el2").values, "EL3": g("el3").values, "EL4": g("el4").values,
+        "eligible": g("eligible").values, "Statut": [motif(i) for i in range(len(df))],
+    })
+    return out
 
 
 # ---------------------------------------------------------------- données de test

@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import kobo
+import tableaux
 import theme
 import viz
 
@@ -126,7 +127,7 @@ if df.empty:
 chips = [("Fiches", f"{len(df)}", ""),
          ("Dernière donnée",
           f"{max([j for j in df['jour'].dropna()]):%d/%m/%Y}" if df["jour"].notna().any() else "—", ""),
-         ("Aires couvertes", f"{df['a3'].nunique() if 'a3' in df else 0} / 11", ""),
+         ("Aires couvertes", f"{df['aire_sante'].nunique() if 'aire_sante' in df else 0} / 11", ""),
          ("Source", "Démonstration — données fictives" if demo else "KoboToolbox — lecture directe",
           "alerte" if demo else "direct")]
 theme.entete(TITRE, SOUS_TITRE, chips)
@@ -182,27 +183,32 @@ def part(col, valeur=1, base=d):
     k = int((base[col] == valeur).sum())
     return (k / len(base)) if len(base) else 0.0, len(base)
 
-sro, n_d = part("k2")
-zinc, _ = part("k3")
-sro_zinc = float(((d.get("k2") == 1) & (d.get("k3") == 1)).mean()) if len(d) else 0.0
+sro, n_d = part("k4")
+zinc, _ = part("k5")
+sro_zinc = float(((d.get("k4") == 1) & (d.get("k5") == 1)).mean()) if len(d) else 0.0
 recours, _ = part("k7")
 
 def carte(col, titre, valeur, note, accent=None):
     theme.carte(col, titre, valeur, note, accent or p["series"][0])
 
 theme.section("Indicateurs clés", "Proportions calculées sur les fiches sélectionnées, avec intervalle de confiance à 95 %.")
-c = st.columns(6, gap="small")
-carte(c[0], "Fiches éligibles", f"{n_tot}", f"{df['a3'].nunique() if 'a3' in df else 0} aire(s) de santé")
+c = st.columns(7, gap="small")
+carte(c[0], "Fiches éligibles", f"{n_tot}", f"{df['aire_sante'].nunique() if 'aire_sante' in df else 0} aire(s) de santé")
 carte(c[1], "Prévalence diarrhée (14 j)", f"{viz.fr(prev*100)} %",
       f"IC 95 % : {viz.fr(prev_b*100)} – {viz.fr(prev_h*100)} %", p["series"][1])
 carte(c[2], "Cas de diarrhée", f"{len(d)}", "enfants concernés")
 carte(c[3], "SRO", f"{viz.fr(sro*100, 0)} %", f"des {n_d} cas", p["good"])
 carte(c[4], "SRO + zinc", f"{viz.fr(sro_zinc*100, 0)} %", "prise en charge complète", p["good"])
 carte(c[5], "Recours aux soins", f"{viz.fr(recours*100, 0)} %", "hors domicile", p["series"][0])
+if "malnutrition_aigue_pb" in df and df["malnutrition_aigue_pb"].notna().any():
+    ma = df["malnutrition_aigue_pb"].dropna()
+    carte(c[6], "Malnutrition aiguë (PB/œdèmes)", f"{viz.fr(ma.mean()*100)} %", f"{int(ma.sum())} enfant(s) sur {len(ma)} mesurés", p["bad"])
+else:
+    carte(c[6], "Malnutrition aiguë (PB/œdèmes)", "—", "mesures non disponibles", p["bad"])
 st.write("")
 
 onglets = st.tabs(["Suivi de la collecte", "Profil épidémiologique", "Facteurs associés",
-                   "Prise en charge", "Connaissances", "Données"])
+                   "Prise en charge", "Connaissances", "Tableaux du mémoire", "Données"])
 
 # 1 — collecte -----------------------------------------------------------------
 with onglets[0]:
@@ -214,17 +220,17 @@ with onglets[0]:
     g2.plotly_chart(viz.courbe_cumul(parjour["jour"], parjour["cumul"], "Cumul des fiches collectées", p),
                     width="stretch")
     g3, g4 = st.columns(2)
-    if "a6" in df:
-        pe = df.groupby("a6").agg(fiches=("a6", "size"),
-                                  duree=("duree_min", "median") if "duree_min" in df else ("a6", "size")).reset_index()
+    if "enqueteur" in df:
+        pe = df.groupby("enqueteur").agg(fiches=("enqueteur", "size"),
+                                  duree=("duree_min", "median") if "duree_min" in df else ("enqueteur", "size")).reset_index()
         pe = pe.sort_values("fiches", ascending=False)
         g3.plotly_chart(viz.barres_proportions(
-            pe["a6"].tolist(), (pe["fiches"] / pe["fiches"].sum()).tolist(),
+            pe["enqueteur"].tolist(), (pe["fiches"] / pe["fiches"].sum()).tolist(),
             (pe["fiches"] / pe["fiches"].sum()).tolist(), (pe["fiches"] / pe["fiches"].sum()).tolist(),
             pe["fiches"].tolist(), "Répartition des fiches par enquêteur", p), width="stretch")
         if "duree_min" in df:
             g4.markdown("**Durée médiane d'entretien par enquêteur**")
-            g4.dataframe(pe.rename(columns={"a6": "Enquêteur", "fiches": "Fiches", "duree": "Durée médiane (min)"})
+            g4.dataframe(pe.rename(columns={"enqueteur": "Enquêteur", "fiches": "Fiches", "duree": "Durée médiane (min)"})
                          .round(1), hide_index=True, width="stretch")
 
 # 2 — profil épidémiologique ---------------------------------------------------
@@ -258,6 +264,30 @@ with onglets[1]:
             [l[0] for l in lignes], [l[1] for l in lignes], [l[2] for l in lignes],
             [l[3] for l in lignes], [l[4] for l in lignes], "Prévalence selon le sexe", p),
             width="stretch")
+
+    if "emaciation" in df:
+        st.markdown("**État nutritionnel des enfants** — normes de croissance de l'OMS (2006)")
+        nut = []
+        for nom, colonne in [("Émaciation (P/T < −2 z)", "emaciation"), ("Retard de croissance (T/A < −2 z)", "retard_croissance"),
+                             ("Insuffisance pondérale (P/A < −2 z)", "insuffisance_ponderale"),
+                             ("Malnutrition aiguë (PB < 125 mm ou œdèmes)", "malnutrition_aigue_pb")]:
+            s_ = df[colonne].dropna()
+            if len(s_):
+                v_, b_, h_ = viz.wilson(int(s_.sum()), len(s_))
+                nut.append((nom, v_, b_, h_, len(s_)))
+        if nut:
+            n1, n2 = st.columns([3, 2])
+            n1.plotly_chart(viz.barres_proportions([x[0] for x in nut], [x[1] for x in nut], [x[2] for x in nut],
+                            [x[3] for x in nut], [x[4] for x in nut], "Malnutrition chez les enfants de 0 à 59 mois — IC 95 %", p,
+                            couleur=p["series"][7]), width="stretch")
+            if df["emaciation"].notna().sum() and (df["emaciation"] == 1).any():
+                pr = [(g, *viz.wilson(int((df.loc[df["emaciation"] == k, "j1"] == 1).sum()), int((df["emaciation"] == k).sum())),
+                       int((df["emaciation"] == k).sum())) for g, k in (("Enfants émaciés", 1), ("Enfants non émaciés", 0))]
+                n2.plotly_chart(viz.barres_proportions([x[0] for x in pr], [x[1] for x in pr], [x[2] for x in pr],
+                                [x[3] for x in pr], [x[4] for x in pr], "Prévalence de la diarrhée selon l'émaciation", p,
+                                couleur=p["series"][1]), width="stretch")
+            st.caption("z-scores calculés dans l'application (méthode LMS de l'OMS, écart moyen avec WHO Anthro ≈ 0,005 z). "
+                       "Pour les chiffres définitifs du mémoire, confirmer avec WHO Anthro.")
 
 # 3 — facteurs associés --------------------------------------------------------
 with onglets[2]:
@@ -320,10 +350,10 @@ with onglets[3]:
     else:
         etapes = [
             ("Liquides augmentés", (d.get("k1") == 1)),
-            ("SRO reçus", (d.get("k2") == 1)),
-            ("Zinc reçu", (d.get("k3") == 1)),
-            ("SRO + zinc", (d.get("k2") == 1) & (d.get("k3") == 1)),
-            ("Alimentation maintenue ou augmentée", d.get("k6").isin([1, 2])),
+            ("SRO reçus", (d.get("k4") == 1)),
+            ("Zinc reçu", (d.get("k5") == 1)),
+            ("SRO + zinc", (d.get("k4") == 1) & (d.get("k5") == 1)),
+            ("Alimentation maintenue ou augmentée", d.get("k3").isin([1, 2])),
             ("Recours aux soins hors domicile", (d.get("k7") == 1)),
             ("Recours dans les 24–48 h", (d.get("k7") == 1) & d.get("k9").isin([1, 2])),
         ]
@@ -365,10 +395,147 @@ with onglets[4]:
                             "Score moyen de connaissances (en % du maximum) selon le niveau d'études du répondant", p,
                             couleur=p["series"][6]), width="stretch")
 
-# 6 — données ------------------------------------------------------------------
+# 6 — tableaux du mémoire -------------------------------------------------------
+def afficher_tableau(titre, t, note=""):
+    st.markdown(f"**{titre}**")
+    vis = [c for c in t.columns if not c.startswith("_")]
+    t_aff = t.copy()
+    for c_ in vis:
+        t_aff[c_] = t_aff[c_].astype(str).replace({"nan": ""})
+    if "_niv" in t.columns:
+        sty = t_aff.style.apply(lambda r: ["font-weight:700; background-color:rgba(127,127,127,.10)" if r["_niv"] == "h" else ""
+                                       for _ in r], axis=1)
+    else:
+        sty = t_aff
+    st.dataframe(sty, column_order=vis, hide_index=True, width="stretch",
+                 height=min(38 * (len(t) + 1) + 4, 620))
+    st.caption((note + " " if note else "") + "Source : enquête ménage, Zone de Santé de Limete, 2026.")
+    EXPORT.append((titre, t, note))
+
+
+EXPORT = []
 with onglets[5]:
-    colonnes = [c for c in ["_id", "jour", "aire_sante", "a5", "a6", "sexe", "b3", "tranche_age", "j1",
-                            "k2", "k3", "k7", "score_biens", "score_connaissances", "duree_min"] if c in df]
+    st.markdown("Les tableaux du chapitre IV du mémoire, recalculés en direct sur les fiches sélectionnées "
+                "(les filtres en haut de page s'appliquent). Le bouton en bas de page télécharge tous les tableaux "
+                "dans un classeur Excel, un tableau par feuille, prêts à être copiés dans le mémoire.")
+    V = tableaux.variables(df, dico)
+    cat = tableaux.catalogue(V)
+    sections = ["Participation et prévalence", "Caractéristiques", "Facteurs associés", "Modèle multivarié",
+                "Prévention et connaissances", "Prise en charge"]
+    choix_sec = st.segmented_control("Partie du chapitre Résultats", sections, default=sections[0],
+                                     label_visibility="collapsed") or sections[0]
+
+    # --- tableaux 5 à 7 (toujours calculés pour l'export)
+    part_ = kobo.participation(brut)
+    t5 = pd.DataFrame([
+        {"Indicateur": "Fiches envoyées (ménages visités et enregistrés)", "Effectif": part_.get("soumises", 0)},
+        *[{"Indicateur": f"   Non éligibles — {k}", "Effectif": v} for k, v in part_.get("detail_non_elig", {}).items()],
+        {"Indicateur": "Refus de participation (EL4 = Non)", "Effectif": part_.get("refus", 0)},
+        {"Indicateur": "Ménages enquêtés (fiches éligibles)", "Effectif": part_.get("enquetes", 0)},
+        {"Indicateur": "Taux de participation parmi les éligibles (%)",
+         "Effectif": viz.fr(100 * part_.get("enquetes", 0) / max(1, part_.get("enquetes", 0) + part_.get("refus", 0)))},
+    ])
+    k6 = int((df["j1"] == 1).sum())
+    v6, b6, h6 = viz.wilson(k6, len(df))
+    t6 = pd.DataFrame([
+        {"Diarrhée au cours des 14 derniers jours": "Oui", "Effectif (n)": k6, "Pourcentage (%)": viz.fr(100 * v6),
+         "IC à 95 %": f"{viz.fr(100 * b6)} – {viz.fr(100 * h6)}"},
+        {"Diarrhée au cours des 14 derniers jours": "Non", "Effectif (n)": len(df) - k6,
+         "Pourcentage (%)": viz.fr(100 - 100 * v6), "IC à 95 %": ""},
+        {"Diarrhée au cours des 14 derniers jours": "Total", "Effectif (n)": len(df), "Pourcentage (%)": "100,0", "IC à 95 %": ""}])
+    lignes7 = []
+    for aire, g in df.groupby("aire_sante") if "aire_sante" in df else []:
+        kk = int((g["j1"] == 1).sum()); vv, bb, hh = viz.wilson(kk, len(g))
+        lignes7.append({"Aire de santé": aire, "Enfants enquêtés (n)": len(g), "Cas de diarrhée (n)": kk,
+                        "Prévalence (%)": viz.fr(100 * vv), "IC à 95 %": f"{viz.fr(100 * bb)} – {viz.fr(100 * hh)}"})
+    lignes7.append({"Aire de santé": "Total", "Enfants enquêtés (n)": len(df), "Cas de diarrhée (n)": k6,
+                    "Prévalence (%)": viz.fr(100 * v6), "IC à 95 %": f"{viz.fr(100 * b6)} – {viz.fr(100 * h6)}"})
+    t7 = pd.DataFrame(lignes7)
+    n5 = ("Calculé sur toutes les fiches envoyées (filtres non appliqués). Les absences (ménage revisité) "
+          "sont suivies sur la fiche papier de suivi des ménages et ne figurent pas dans Kobo.")
+
+    def rendu(sec):
+        return choix_sec == sec
+
+    if rendu("Participation et prévalence"):
+        afficher_tableau("Tableau 5 : Participation à l'enquête", t5, n5)
+        afficher_tableau("Tableau 6 : Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois", t6,
+                         "IC à 95 % : méthode de Wilson.")
+        afficher_tableau("Tableau 7 : Prévalence de la diarrhée selon l'aire de santé", t7)
+    else:
+        EXPORT += [("Tableau 5 : Participation à l'enquête", t5, n5),
+                   ("Tableau 6 : Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois", t6, ""),
+                   ("Tableau 7 : Prévalence de la diarrhée selon l'aire de santé", t7, "")]
+
+    for spec in cat:
+        titre = f"Tableau {spec['num']} : {spec['titre']}"
+        if spec["type"] == "desc":
+            t = tableaux.tableau_descriptif(spec["vars"]); note = spec.get("note", "")
+        else:
+            t, _ = tableaux.tableau_bivarie(df, spec["vars"]); note = (spec.get("note", "") + " " + tableaux.NOTE_BIV).strip()
+        sec = "Prévalence" if spec["section"] == "Prévalence" else spec["section"]
+        affiche = rendu(sec) or (sec == "Prévalence" and rendu("Participation et prévalence"))
+        if affiche:
+            afficher_tableau(titre, t, note)
+        else:
+            EXPORT.append((titre, t, note))
+
+    # --- expositions binaires : ORb (forêt) et modèle multivarié
+    E = tableaux.expositions_binaires(df)
+    if rendu("Facteurs associés"):
+        st.markdown("---")
+        lib, o_, lo_, hi_ = [], [], [], []
+        for nom, s_ in E.items():
+            ok = s_.notna() & df["j1"].isin([0, 1])
+            a_ = int(((s_ == 1) & (df["j1"] == 1) & ok).sum()); b_ = int(((s_ == 1) & (df["j1"] == 0) & ok).sum())
+            c_ = int(((s_ == 0) & (df["j1"] == 1) & ok).sum()); d_ = int(((s_ == 0) & (df["j1"] == 0) & ok).sum())
+            if min(a_ + b_, c_ + d_) > 0:
+                o, lo, hi = tableaux._or_ic(a_, b_, c_, d_)
+                lib.append(nom); o_.append(o); lo_.append(lo); hi_.append(hi)
+        if lib:
+            ordre = sorted(range(len(o_)), key=lambda i: -o_[i])
+            st.plotly_chart(viz.points_ratios([lib[i] for i in ordre], [o_[i] for i in ordre], [lo_[i] for i in ordre],
+                                              [hi_[i] for i in ordre], "Odds ratios bruts de la diarrhée selon les principales expositions", p,
+                                              xtitre="Odds ratio brut (échelle log.)", nom="ORb"), width="stretch")
+
+    p_bi = {nom: tableaux.p_bivarie(df, s_) for nom, s_ in E.items()}
+    defaut = [n_ for n_, pv in p_bi.items() if pv == pv and pv < 0.20]
+    if rendu("Modèle multivarié"):
+        st.markdown("**Choix des variables du modèle** — présélection automatique des expositions avec p < 0,20 "
+                    "en analyse bivariée ; ajouter les variables importantes sur le plan conceptuel.")
+        retenues = st.multiselect("Variables du modèle", list(E), default=defaut, label_visibility="collapsed")
+        st.session_state["vars_modele"] = retenues
+    retenues = st.session_state.get("vars_modele", defaut)
+    t22, info = (tableaux.regression_logistique(df, {k: E[k] for k in retenues}) if retenues
+                 else (pd.DataFrame(), {"erreur": "Aucune variable sélectionnée."}))
+    n22 = ("ORa : odds ratio ajusté ; IC 95 % : intervalle de confiance à 95 %. "
+           + (f"n = {info['n']} enfants, {info['cas']} cas. Hosmer-Lemeshow : χ² = {viz.fr(info['hl'][0], 2)} ; ddl = {info['hl'][1]} ; "
+              f"p = {tableaux.fmt_p(info['hl'][2])}. Pseudo-R² de McFadden = {viz.fr(info['pseudo_r2'], 3)}." if "hl" in info else ""))
+    titre22 = "Tableau 22 : Facteurs indépendamment associés à la diarrhée : régression logistique multivariée"
+    if rendu("Modèle multivarié"):
+        if "erreur" in info:
+            st.warning(info["erreur"])
+        else:
+            afficher_tableau(titre22, t22, n22)
+            st.plotly_chart(viz.points_ratios(t22["Variables (exposé vs non exposé)"].tolist(), t22["_ora"].tolist(),
+                                              t22["_lo"].tolist(), t22["_hi"].tolist(), "Odds ratios ajustés (IC 95 %)", p,
+                                              xtitre="Odds ratio ajusté (échelle log.)", nom="ORa"), width="stretch")
+            st.caption("Modèle exploratoire : le modèle final du mémoire se construit pas à pas (confusion, interactions, "
+                       "colinéarité) et, si le plan de sondage le justifie, en tenant compte de l'effet grappe.")
+    elif "erreur" not in info:
+        EXPORT.append((titre22, t22, n22))
+
+    st.markdown("---")
+    EXPORT.sort(key=lambda x: int(x[0].split()[1]))
+    st.download_button("Télécharger tous les tableaux du mémoire (Excel)", tableaux.exporter_excel(EXPORT),
+                       file_name=f"tableaux_resultats_diarrhee_limete_{dt.date.today():%Y%m%d}.xlsx",
+                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
+
+# 7 — données ------------------------------------------------------------------
+with onglets[6]:
+    colonnes = [c for c in ["_id", "jour", "aire_sante", "a6", "enqueteur", "sexe", "b3", "tranche_age", "j1",
+                            "k4", "k5", "k7", "poids_final", "taille_final", "pb_final", "whz", "haz", "waz",
+                            "score_biens", "score_connaissances", "duree_min"] if c in df]
     st.dataframe(df[colonnes], hide_index=True, width="stretch", height=460)
     tampon = io.BytesIO()
     with pd.ExcelWriter(tampon, engine="openpyxl") as w:
@@ -380,4 +547,4 @@ with onglets[5]:
                        file_name=f"donnees_diarrhee_limete_{dt.date.today():%Y%m%d}.csv", mime="text/csv")
 
 st.caption(f"Dernière actualisation : {dt.datetime.now():%d/%m/%Y %H:%M} — "
-           "source : KoboToolbox, formulaire kobo_diarrhee_limete_2026 (V3).")
+           "source : KoboToolbox, formulaire kobo_diarrhee_limete_2026 (V7).")

@@ -92,11 +92,6 @@ def barres_proportions(libelles, valeurs, bas, haut, effectifs, titre, p, height
     return fig
 
 
-def fr(x: float, dec: int = 1) -> str:
-    """Format français : 25.7 -> '25,7'."""
-    return f"{x:.{dec}f}".replace(".", ",")
-
-
 def barres_temps(x, y, titre, p, couleur=None, ytitre=""):
     couleur = couleur or p["series"][0]
     fig = go.Figure(go.Bar(x=x, y=y, marker=dict(color=couleur, line=dict(width=2, color=p["surface"])),
@@ -130,7 +125,7 @@ def barres_empilees(categories, series, titre, p):
     fig.update_yaxes(tickformat=".0%", range=[0, 1])
     return fig
 
-def points_ratios(libelles, rp, bas, haut, titre, p):
+def points_ratios(libelles, rp, bas, haut, titre, p, xtitre="Ratio de prévalence (échelle log.)", nom="RP"):
     """Graphique en forêt : ratios de prévalence avec IC 95 % et ligne de référence à 1."""
     h = max(240, 70 + 34 * len(libelles))
     fig = go.Figure(go.Scatter(
@@ -138,12 +133,12 @@ def points_ratios(libelles, rp, bas, haut, titre, p):
         error_x=dict(type="data", symmetric=False,
                      array=[hh - v for hh, v in zip(haut, rp)], arrayminus=[v - bb for bb, v in zip(bas, rp)],
                      color=p["muted"], thickness=1.5, width=5),
-        hovertemplate="<b>%{y}</b><br>RP = %{x:.2f}<br>IC 95 % : %{customdata[0]:.2f} – %{customdata[1]:.2f}<extra></extra>",
+        hovertemplate="<b>%{y}</b><br>" + nom + " = %{x:.2f}<br>IC 95 % : %{customdata[0]:.2f} – %{customdata[1]:.2f}<extra></extra>",
         customdata=list(zip(bas, haut)),
     ))
     fig.add_vline(x=1, line=dict(color=p["muted"], width=1, dash="dot"))
     fig.update_layout(**layout(p, height=h, title=dict(text=titre, font=dict(size=15, color=p["text"]), x=0, xanchor="left")))
-    fig.update_xaxes(type="log", title="Ratio de prévalence (échelle log.)")
+    fig.update_xaxes(type="log", title=xtitre)
     fig.update_yaxes(autorange="reversed")
     return fig
 

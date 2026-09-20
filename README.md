@@ -1,7 +1,7 @@
 # Tableau de bord — Diarrhée chez les enfants de moins de 5 ans, ZS de Limete
 
 Visualisation dynamique des données collectées avec **KoboCollect** (formulaire
-`kobo_diarrhee_limete_2026`, version V3). Le tableau de bord lit les soumissions
+`kobo_diarrhee_limete_2026`, version V7). Le tableau de bord lit les soumissions
 **en direct** via l'API REST de KoboToolbox : aucune exportation manuelle n'est nécessaire.
 
 ## 1. Contenu du dépôt
@@ -12,7 +12,10 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | `theme.py` | Habillage : bandeau de titre, cartes d'indicateurs, onglets, listes déroulantes |
 | `kobo.py` | Connexion à l'API KoboToolbox, dictionnaire des variables, préparation des données |
 | `viz.py` | Thème graphique, intervalles de confiance, ratios de prévalence, graphiques |
-| `KoboCollect_XLSForm_Diarrhee_Limete_2026_V3.xlsx` | Le formulaire : sert de dictionnaire (codes → libellés) |
+| `tableaux.py` | Tableaux du chapitre Résultats du mémoire (descriptifs, bivariés, régression logistique) et export Excel |
+| `nutrition.py` | Calcul des z-scores (normes de croissance OMS 2006) et classes d'état nutritionnel |
+| `who_lms.csv` | Tables de référence LMS de l'OMS (poids-pour-âge, taille-pour-âge, poids-pour-taille) |
+| `KoboCollect_XLSForm_Diarrhee_Limete_2026_V7.xlsx` | Le formulaire : sert de dictionnaire (codes → libellés) |
 | `requirements.txt` | Dépendances Python |
 | `.streamlit/config.toml` | Thème de l'interface |
 | `.streamlit/secrets.toml.example` | Modèle de configuration des accès (Streamlit Cloud) |
@@ -75,6 +78,14 @@ Pour restreindre l'accès : Streamlit Cloud permet de limiter l'application à d
 - **Facteurs associés** : niveaux de service WASH selon l'échelle JMP, et ratios de prévalence bruts (graphique en forêt + tableau) pour les expositions clés — inondation, eaux stagnantes, eau non améliorée, latrine partagée, absence de savon, surpeuplement.
 - **Prise en charge** : cascade SRO / zinc / liquides / alimentation / recours aux soins, et premier lieu de recours.
 - **Connaissances** : distribution du score sur 8, score moyen, score selon le niveau d'études du répondant.
+- **État nutritionnel** (onglet Profil) : émaciation, retard de croissance, insuffisance pondérale et malnutrition aiguë selon le PB, avec IC 95 %, et prévalence de la diarrhée selon l'émaciation.
+- **Tableaux du mémoire** : les tableaux 5 à 31 du chapitre IV recalculés en direct, avec les mêmes numéros, titres et modalités que le mémoire :
+  - participation et prévalence (tableaux 5 à 8) ;
+  - caractéristiques des enfants, des répondants, des ménages et état nutritionnel (9 à 14) ;
+  - analyses bivariées : n (%), ORb [IC 95 %], p du Chi² ou de Fisher (15 à 21), avec un graphique en forêt des ORb ;
+  - modèle de régression logistique (tableau 22) : présélection automatique des variables à p < 0,20, liste modifiable, ORa [IC 95 %], test de Hosmer-Lemeshow ;
+  - prévention, connaissances et prise en charge (23 à 31).
+  Un bouton télécharge **tous les tableaux dans un classeur Excel** (une feuille par tableau, titre et note de source inclus).
 - **Données** : tableau filtrable et export Excel ou CSV des données filtrées.
 
 ## 6. Apparence
@@ -91,7 +102,10 @@ il suffit de modifier le fichier : l'application se redéploie automatiquement.
 
 - Les proportions sont accompagnées d'un **intervalle de confiance à 95 % (méthode de Wilson)**, adapté aux petits effectifs.
 - Les **ratios de prévalence** sont bruts, non ajustés (IC selon la méthode de Katz) : ils servent à explorer les données pendant la collecte, pas à conclure. L'analyse finale passe par la régression prévue au protocole.
-- Seules les fiches avec `eligible = 1` (consentement, résidence et enfant éligible) sont retenues.
+- Seules les fiches avec `eligible = 1` (résidence ≥ 6 mois, enfant éligible, consentement) sont retenues ; le tableau 5 utilise toutes les fiches envoyées.
+- **z-scores** : méthode LMS de l'OMS (correction au-delà de ±3 z pour les indices fondés sur le poids), âge exact calculé à partir des dates de naissance et d'enquête, correction de 0,7 cm si la position de mesure ne correspond pas à l'âge, exclusion des valeurs biologiquement invraisemblables. Validé sur les données de test de WHO Anthro (écart moyen 0,005 z) ; les chiffres définitifs du mémoire restent à confirmer avec WHO Anthro.
+- **Odds ratios bruts** : méthode de Woolf (correction de Haldane si une cellule est nulle). Le modèle multivarié de l'application est exploratoire : il ne remplace pas la construction pas à pas du modèle final.
+- Données collectées avec l'ancienne version V3 du formulaire : les noms de variables sont convertis automatiquement vers la V7.
 - Les données sont mises en cache **5 minutes** ; le bouton *Actualiser* force la relecture.
 
 ## 8. Adapter le tableau de bord

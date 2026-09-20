@@ -5,6 +5,8 @@ Le tableau de bord lit les soumissions en direct via l'API REST de KoboToolbox
 libellés à partir du XLSForm déposé dans le dépôt (version V7 du formulaire).
 """
 from __future__ import annotations
+
+VERSION_TDB = "5"  # doit correspondre à app.py
 import datetime as dt
 import random
 from typing import Dict, List

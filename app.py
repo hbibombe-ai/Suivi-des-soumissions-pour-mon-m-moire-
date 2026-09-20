@@ -19,6 +19,22 @@ import viz
 st.set_page_config(page_title="Diarrhée < 5 ans — ZS Limete", page_icon="💧",
                    layout="wide", initial_sidebar_state="expanded")
 
+# Contrôle de cohérence : tous les fichiers du dépôt doivent provenir de la même version
+VERSION_TDB = "5"
+try:
+    import nutrition
+    import tableaux as _t
+    _perimes = [nom for nom, mod in (("kobo.py", kobo), ("tableaux.py", _t), ("nutrition.py", nutrition), ("viz.py", viz))
+                if getattr(mod, "VERSION_TDB", None) != VERSION_TDB]
+except ImportError as _e:
+    _perimes = [f"{_e.name}.py (fichier absent)"]
+if _perimes:
+    st.error("**Mise à jour incomplète du dépôt GitHub.** Ces fichiers ne correspondent pas à la version de `app.py` : "
+             + ", ".join(f"`{f}`" for f in _perimes)
+             + ". Remplacer **tous** les fichiers du dépôt par ceux du dernier zip (y compris `who_lms.csv`, "
+             "`requirements.txt` et le formulaire `KoboCollect_XLSForm_Diarrhee_Limete_2026_V7.xlsx`), puis redéployer.")
+    st.stop()
+
 TITRE = "Profil épidémiologique et facteurs associés à la diarrhée chez les enfants de moins de 5 ans"
 SOUS_TITRE = "Zone de Santé de Limete, Kinshasa — collecte KoboCollect 2026"
 

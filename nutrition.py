@@ -6,6 +6,8 @@ interpolation linéaire entre deux points. Les résultats sont très proches de 
 (écart habituel ≤ 0,05 z) ; pour les chiffres définitifs du mémoire, WHO Anthro reste la référence.
 """
 from __future__ import annotations
+
+VERSION_TDB = "5"  # doit correspondre à app.py
 import math
 import os
 from functools import lru_cache

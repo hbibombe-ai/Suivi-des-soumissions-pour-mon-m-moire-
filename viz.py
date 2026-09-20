@@ -1,5 +1,7 @@
 """Thème graphique et composants de visualisation (palette validée, mode clair/sombre)."""
 from __future__ import annotations
+
+VERSION_TDB = "5"  # doit correspondre à app.py
 import math
 import plotly.graph_objects as go
 

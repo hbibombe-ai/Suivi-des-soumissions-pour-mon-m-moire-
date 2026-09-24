@@ -13,6 +13,8 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | `kobo.py` | Connexion à l'API KoboToolbox, dictionnaire des variables, préparation des données |
 | `viz.py` | Thème graphique, intervalles de confiance, ratios de prévalence, graphiques |
 | `tableaux.py` | Tableaux du chapitre Résultats du mémoire (descriptifs, bivariés, régression logistique) et export Excel |
+| `geo.py` | Géolocalisation : lecture du GPS (A7), contrôle qualité, floutage, cartes |
+| `partage.py` | Partage : lien, lien vers la vue filtrée, QR code, WhatsApp, e-mail, SMS |
 | `nutrition.py` | Calcul des z-scores (normes de croissance OMS 2006) et classes d'état nutritionnel |
 | `who_lms.csv` | Tables de référence LMS de l'OMS (poids-pour-âge, taille-pour-âge, poids-pour-taille) |
 | `KoboCollect_XLSForm_Diarrhee_Limete_2026_V7.xlsx` | Le formulaire : sert de dictionnaire (codes → libellés) |
@@ -86,9 +88,47 @@ Pour restreindre l'accès : Streamlit Cloud permet de limiter l'application à d
   - modèle de régression logistique (tableau 22) : présélection automatique des variables à p < 0,20, liste modifiable, ORa [IC 95 %], test de Hosmer-Lemeshow ;
   - prévention, connaissances et prise en charge (23 à 31).
   Un bouton télécharge **tous les tableaux dans un classeur Excel** (une feuille par tableau, titre et note de source inclus).
-- **Données** : tableau filtrable et export Excel ou CSV des données filtrées.
+- **Carte** : géolocalisation des ménages, qualité du GPS, concentration des cas, prévalence par aire (voir section 6).
+- **Données** : tableau filtrable et export Excel ou CSV des données filtrées (sans GPS par défaut).
 
-## 6. Apparence
+## 6. Carte (géolocalisation des ménages)
+
+L'onglet **Carte** exploite la question A7 (geopoint) :
+
+- **Qualité du GPS** : % de ménages géolocalisés, coordonnées manquantes, points hors de Limete, précision médiane ;
+  tableau par enquêteur et liste des fiches à vérifier (réglages de l'emprise et du seuil de précision dans `geo.py`).
+- **Trois vues** : *Ménages* (un point par ménage, couleur au choix : diarrhée, aire, enquêteur, qualité GPS),
+  *Concentration des cas* (carte de chaleur), *Synthèse par aire* (une bulle par aire, couleur = prévalence).
+- **Confidentialité** : les points sont **floutés par défaut** (déplacement stable de 50 à 150 m). La position exacte,
+  le code ménage et l'enquêteur n'apparaissent qu'en activant *Position exacte (usage interne)*.
+  Pour une présentation ou un partage, utiliser la vue *Synthèse par aire*, qui n'affiche aucun ménage.
+- Les exports de l'onglet *Données* **excluent les coordonnées GPS**, sauf si l'on coche l'option correspondante.
+- Fonds de carte OpenStreetMap (mode clair) ou CARTO (mode sombre) : une connexion internet est nécessaire.
+
+## 7. Partager le tableau de bord
+
+Le volet **Partager le tableau de bord**, en haut de la barre latérale, propose :
+
+- le **lien** de l'application, avec un bouton de copie ;
+- l'option **Partager la vue filtrée** : le lien contient la période, les aires, le sexe et les tranches d'âge
+  sélectionnés ; le destinataire ouvre exactement la même vue. L'adresse du navigateur est d'ailleurs mise à jour
+  à chaque changement de filtre : on peut aussi la copier directement ;
+- l'envoi par **WhatsApp**, **e-mail** ou **SMS**, avec un message qui résume la prévalence du moment ;
+- un **QR code** à projeter en réunion ou à imprimer (téléchargeable en PNG).
+
+Pour que le lien soit correct, indiquer l'adresse publique dans les Secrets :
+
+```toml
+[app]
+url = "https://votre-application.streamlit.app"
+```
+
+> **Contrôler qui peut ouvrir le lien.** Sur Streamlit Community Cloud, *Share* → *Who can view this app* :
+> choisir **Only specific people** et inviter les adresses e-mail de l'équipe (encadreur, superviseurs, BCZS).
+> Partager le lien ne suffit pas à donner l'accès. Les données contenant des positions de ménages,
+> **ne pas rendre l'application publique**.
+
+## 8. Apparence
 
 L'interface suit le thème défini dans `.streamlit/config.toml` :
 
@@ -98,7 +138,7 @@ L'interface suit le thème défini dans `.streamlit/config.toml` :
 Interface, listes déroulantes, tableaux et graphiques basculent ensemble. Sur Streamlit Cloud,
 il suffit de modifier le fichier : l'application se redéploie automatiquement.
 
-## 7. Notes méthodologiques
+## 9. Notes méthodologiques
 
 - Les proportions sont accompagnées d'un **intervalle de confiance à 95 % (méthode de Wilson)**, adapté aux petits effectifs.
 - Les **ratios de prévalence** sont bruts, non ajustés (IC selon la méthode de Katz) : ils servent à explorer les données pendant la collecte, pas à conclure. L'analyse finale passe par la régression prévue au protocole.
@@ -108,7 +148,7 @@ il suffit de modifier le fichier : l'application se redéploie automatiquement.
 - Données collectées avec l'ancienne version V3 du formulaire : les noms de variables sont convertis automatiquement vers la V7.
 - Les données sont mises en cache **5 minutes** ; le bouton *Actualiser* force la relecture.
 
-## 8. Adapter le tableau de bord
+## 10. Adapter le tableau de bord
 
 - Le formulaire évolue ? Remplacer le fichier XLSForm du dépôt : les libellés des questions et des modalités suivent automatiquement.
 - Ajouter un indicateur : le calculer dans `kobo.preparer()`, puis l'afficher dans l'onglet voulu de `app.py`.

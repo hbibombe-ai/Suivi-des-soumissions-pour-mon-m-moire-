@@ -6,7 +6,7 @@ et modèle de régression logistique multivariée (ORa [IC 95 %], p, test de Hos
 """
 from __future__ import annotations
 
-VERSION_TDB = "5"  # doit correspondre à app.py
+VERSION_TDB = "6"  # doit correspondre à app.py
 import io
 import math
 from typing import Callable, Dict, List, Optional, Tuple

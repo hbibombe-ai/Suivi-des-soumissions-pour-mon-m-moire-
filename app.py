@@ -11,7 +11,9 @@ import os
 import pandas as pd
 import streamlit as st
 
+import geo
 import kobo
+import partage
 import tableaux
 import theme
 import viz
@@ -20,11 +22,12 @@ st.set_page_config(page_title="Diarrhée < 5 ans — ZS Limete", page_icon="💧
                    layout="wide", initial_sidebar_state="expanded")
 
 # Contrôle de cohérence : tous les fichiers du dépôt doivent provenir de la même version
-VERSION_TDB = "5"
+VERSION_TDB = "6"
 try:
     import nutrition
     import tableaux as _t
-    _perimes = [nom for nom, mod in (("kobo.py", kobo), ("tableaux.py", _t), ("nutrition.py", nutrition), ("viz.py", viz))
+    _perimes = [nom for nom, mod in (("kobo.py", kobo), ("tableaux.py", _t), ("nutrition.py", nutrition), ("viz.py", viz),
+                                      ("geo.py", geo), ("partage.py", partage))
                 if getattr(mod, "VERSION_TDB", None) != VERSION_TDB]
 except ImportError as _e:
     _perimes = [f"{_e.name}.py (fichier absent)"]
@@ -74,9 +77,10 @@ with st.sidebar:
     st.markdown('<div class="marque"><span class="ico">💧</span>'
                 '<span class="txt">Enquête diarrhée &lt; 5 ans<em>ZS de Limete · Kinshasa · 2026</em></span></div>',
                 unsafe_allow_html=True)
+    zone_partage = st.container()  # rempli plus bas, une fois les filtres et indicateurs calculés
 
     st.markdown("### Affichage")
-    demo = st.toggle("Mode démonstration", value=not parametre("token"),
+    demo = st.toggle("Mode démonstration", value=(partage.lire_texte("demo") == "1") or not parametre("token"),
                      help="Données fictives, pour présenter le tableau de bord avant la collecte.")
 
     st.markdown("### Connexion KoboToolbox")
@@ -177,26 +181,44 @@ theme.entete(TITRE, SOUS_TITRE, chips)
 st.markdown('<div class="filtre-titre">Filtres</div>', unsafe_allow_html=True)
 f1, f2, f3, f4 = st.columns([1.6, 2.2, 1.1, 1.6])
 jours = sorted([j for j in df["jour"].dropna().unique()])
+FILTRES = {"demo": "1"} if demo else {}
+def _date_url(cle, defaut):
+    try:
+        return min(max(dt.date.fromisoformat(partage.lire_texte(cle)), jours[0]), jours[-1])
+    except ValueError:
+        return defaut
 if jours:
-    periode = f1.date_input("Période de collecte", value=(jours[0], jours[-1]),
+    du, au = _date_url("du", jours[0]), _date_url("au", jours[-1])
+    periode = f1.date_input("Période de collecte", value=(du, au),
                             min_value=jours[0], max_value=jours[-1], format="DD/MM/YYYY")
     if isinstance(periode, (list, tuple)) and len(periode) == 2:
         df = df[(df["jour"] >= periode[0]) & (df["jour"] <= periode[1])]
+        if periode[0] != jours[0]:
+            FILTRES["du"] = periode[0].isoformat()
+        if periode[1] != jours[-1]:
+            FILTRES["au"] = periode[1].isoformat()
 
 aires = sorted(df["aire_sante"].dropna().unique()) if "aire_sante" in df else []
-sel_aires = f2.multiselect("Aires de santé", aires, placeholder=f"Toutes les aires ({len(aires)})")
+sel_aires = f2.multiselect("Aires de santé", aires, default=[a for a in partage.lire_liste("aires") if a in aires],
+                           placeholder=f"Toutes les aires ({len(aires)})")
 if sel_aires:
     df = df[df["aire_sante"].isin(sel_aires)]
+    FILTRES["aires"] = sel_aires
 
 sexes = sorted(df["sexe"].dropna().unique()) if "sexe" in df else []
-sel_sexe = f3.multiselect("Sexe de l'enfant", sexes, placeholder="Les deux")
+sel_sexe = f3.multiselect("Sexe de l'enfant", sexes, default=[x for x in partage.lire_liste("sexe") if x in sexes],
+                          placeholder="Les deux")
 if sel_sexe:
     df = df[df["sexe"].isin(sel_sexe)]
+    FILTRES["sexe"] = sel_sexe
 
 tranches = [t[2] for t in kobo.TRANCHES if t[2] in set(df.get("tranche_age", []))]
-sel_tr = f4.multiselect("Tranche d'âge", tranches, placeholder="Toutes les tranches")
+sel_tr = f4.multiselect("Tranche d'âge", tranches, default=[x for x in partage.lire_liste("tranches") if x in tranches],
+                        placeholder="Toutes les tranches")
 if sel_tr:
     df = df[df["tranche_age"].isin(sel_tr)]
+    FILTRES["tranches"] = sel_tr
+partage.ecrire_filtres(FILTRES)  # l'adresse du navigateur reflète toujours la vue affichée
 
 st.markdown(f'<div class="pdp">{len(df)} fiche(s) sélectionnée(s) · actualisation automatique '
             "toutes les 5 minutes · bouton « Actualiser » pour forcer la lecture.</div>", unsafe_allow_html=True)
@@ -248,7 +270,12 @@ else:
     carte(c[6], "Malnutrition aiguë (PB/œdèmes)", "—", "mesures non disponibles", p["bad"])
 st.write("")
 
-onglets = st.tabs(["Suivi de la collecte", "Profil épidémiologique", "Facteurs associés",
+with zone_partage:
+    partage.panneau({k: v for k, v in FILTRES.items() if k != "demo"} | ({"demo": "1"} if demo else {}),
+                    f"{n_tot} enfants enquêtés · prévalence de la diarrhée (14 j) : {viz.fr(prev*100)} % "
+                    f"[IC 95 % : {viz.fr(prev_b*100)} – {viz.fr(prev_h*100)} %]", "Enquête diarrhée < 5 ans — ZS de Limete")
+
+onglets = st.tabs(["Suivi de la collecte", "Carte", "Profil épidémiologique", "Facteurs associés",
                    "Prise en charge", "Connaissances", "Tableaux du mémoire", "Données"])
 
 # 1 — collecte -----------------------------------------------------------------
@@ -274,8 +301,92 @@ with onglets[0]:
             g4.dataframe(pe.rename(columns={"enqueteur": "Enquêteur", "fiches": "Fiches", "duree": "Durée médiane (min)"})
                          .round(1), hide_index=True, width="stretch")
 
-# 2 — profil épidémiologique ---------------------------------------------------
+# 2 — carte --------------------------------------------------------------------
 with onglets[1]:
+    theme.section("Géolocalisation des ménages",
+                  "Coordonnées GPS relevées à la question A7. Les positions affichées sont floutées par défaut "
+                  "pour protéger la confidentialité des ménages.")
+    qual = df["gps_statut"].value_counts() if "gps_statut" in df else pd.Series(dtype=int)
+    n_val = int(qual.get("Valide", 0))
+    k = st.columns(4, gap="small")
+    carte(k[0], "Ménages géolocalisés", f"{viz.fr(100 * n_val / len(df), 0)} %", f"{n_val} sur {len(df)} fiches", p["good"])
+    carte(k[1], "GPS manquant", f"{int(qual.get('Manquant', 0))}", "fiches sans coordonnées", p["warn"])
+    carte(k[2], "Hors zone", f"{int(qual.get('Hors zone', 0))}", "points hors de Limete", p["bad"])
+    carte(k[3], "Précision médiane",
+          f"{viz.fr(df['gps_precision_m'].median(), 0)} m" if df.get("gps_precision_m", pd.Series(dtype=float)).notna().any() else "—",
+          f"imprécis (> {geo.PRECISION_MAX_M} m) : {int(qual.get(f'Imprécis (> {geo.PRECISION_MAX_M} m)', 0))}", p["series"][0])
+
+    o1, o2, o3 = st.columns([1.4, 1.4, 1.2])
+    vue = o1.radio("Affichage", ["Ménages", "Concentration des cas", "Synthèse par aire"], horizontal=True)
+    couleur_par = o2.selectbox("Couleur des points", ["Diarrhée (14 j)", "Aire de santé", "Enquêteur", "Qualité GPS"],
+                               disabled=vue != "Ménages")
+    exact = o3.toggle("Position exacte (usage interne)", value=False,
+                      help="Désactivé : chaque point est déplacé de 50 à 150 m au hasard (déplacement stable), "
+                           "ce qui empêche d'identifier un ménage. N'activer que pour la supervision de terrain.")
+
+    pts = df[df["lat"].notna() & df["gps_statut"].isin(["Valide", f"Imprécis (> {geo.PRECISION_MAX_M} m)"])].copy()
+    if pts.empty:
+        st.info("Aucune coordonnée GPS exploitable dans la sélection.")
+    else:
+        if not exact:
+            pts = geo.flouter(pts, 150)
+        pts["Diarrhée (14 j)"] = pts["j1"].map({1: "Cas de diarrhée", 0: "Pas de diarrhée"}).fillna("Non renseigné")
+        pts["Aire de santé"] = pts["aire_sante"]
+        pts["Enquêteur"] = pts.get("enqueteur", "—")
+        pts["Qualité GPS"] = pts["gps_statut"]
+        pts["jour_txt"] = pd.to_datetime(pts["jour"]).dt.strftime("%d/%m/%Y")
+        pts["prec_txt"] = pts["gps_precision_m"].map(lambda v: f"{v:.0f} m" if pd.notna(v) else "—")
+        infob = [("Aire", "aire_sante"), ("Diarrhée", "Diarrhée (14 j)"), ("Âge", "tranche_age"), ("Collecte", "jour_txt")]
+        if exact:
+            infob += [("Ménage", "a6"), ("Enquêteur", "enqueteur"), ("Précision", "prec_txt")]
+        if vue == "Ménages":
+            ordre = ["Cas de diarrhée", "Pas de diarrhée", "Non renseigné"] if couleur_par == "Diarrhée (14 j)" else None
+            fixes = {"Cas de diarrhée": p["bad"], "Pas de diarrhée": p["ordinal"][1], "Non renseigné": p["muted"],
+                     "Valide": p["good"], f"Imprécis (> {geo.PRECISION_MAX_M} m)": p["warn"]}
+            st.plotly_chart(geo.carte_points(pts, couleur_par, couleur_par, p, sombre, infob,
+                                             f"{len(pts)} ménages géolocalisés — couleur : {couleur_par.lower()}", ordre, fixes),
+                            width="stretch", config={"scrollZoom": True})
+        elif vue == "Concentration des cas":
+            cas = pts[pts["j1"] == 1]
+            st.plotly_chart(geo.carte_densite(cas, p, sombre, f"Concentration des {len(cas)} cas de diarrhée"),
+                            width="stretch", config={"scrollZoom": True})
+            st.caption("Les zones chaudes montrent où les cas sont nombreux, pas où le risque est élevé : "
+                       "elles reflètent aussi la densité des ménages enquêtés. Comparer avec la prévalence par aire.")
+        else:
+            agg = (pts.assign(cas=(pts["j1"] == 1).astype(int))
+                      .groupby("aire_sante").agg(lat=("lat", "median"), lon=("lon", "median"), n=("cas", "size"), cas=("cas", "sum"))
+                      .reset_index().rename(columns={"aire_sante": "aire"}))
+            agg["prevalence"] = agg["cas"] / agg["n"]
+            st.plotly_chart(geo.carte_aires(agg, p, sombre, "Prévalence de la diarrhée par aire de santé"),
+                            width="stretch", config={"scrollZoom": True})
+            st.caption("Position de chaque bulle : point médian des ménages de l'aire. Aucune position individuelle "
+                       "n'est affichée : c'est la vue à privilégier pour une présentation ou un partage.")
+
+    with st.expander("Contrôle qualité GPS par enquêteur"):
+        if "enqueteur" in df:
+            qc = (df.assign(ok=df["gps_statut"] == "Valide")
+                    .groupby("enqueteur").agg(Fiches=("ok", "size"), Valides=("ok", "sum"),
+                                              Manquants=("gps_statut", lambda s_: int((s_ == "Manquant").sum())),
+                                              Hors_zone=("gps_statut", lambda s_: int((s_ == "Hors zone").sum())),
+                                              Precision_mediane_m=("gps_precision_m", "median")).reset_index())
+            qc["% valides"] = (100 * qc["Valides"] / qc["Fiches"]).round(0)
+            st.dataframe(qc.rename(columns={"enqueteur": "Enquêteur", "Hors_zone": "Hors zone",
+                                            "Precision_mediane_m": "Précision médiane (m)"}).round(1),
+                         hide_index=True, width="stretch")
+        a_verifier = df[df["gps_statut"] != "Valide"]
+        if len(a_verifier):
+            st.markdown(f"**{len(a_verifier)} fiche(s) à vérifier**")
+            st.dataframe(a_verifier[[c for c in ["_id", "jour", "enqueteur", "aire_sante", "a6", "gps_statut", "gps_precision_m"] if c in a_verifier]]
+                         .rename(columns={"_id": "Fiche", "jour": "Date", "enqueteur": "Enquêteur", "aire_sante": "Aire",
+                                          "a6": "Ménage", "gps_statut": "Statut GPS", "gps_precision_m": "Précision (m)"}),
+                         hide_index=True, width="stretch")
+        st.caption(f"Contrôle : point dans l'emprise de Limete (lat. {geo.EMPRISE['lat_min']} à {geo.EMPRISE['lat_max']}, "
+                   f"long. {geo.EMPRISE['lon_min']} à {geo.EMPRISE['lon_max']}) et précision ≤ {geo.PRECISION_MAX_M} m. "
+                   "Réglages modifiables dans geo.py.")
+
+
+# 3 — profil épidémiologique ---------------------------------------------------
+with onglets[2]:
     def prevalence_par(colonne, ordre=None):
         lignes = []
         groupes = ordre or sorted(df[colonne].dropna().unique())
@@ -330,8 +441,8 @@ with onglets[1]:
             st.caption("z-scores calculés dans l'application (méthode LMS de l'OMS, écart moyen avec WHO Anthro ≈ 0,005 z). "
                        "Pour les chiffres définitifs du mémoire, confirmer avec WHO Anthro.")
 
-# 3 — facteurs associés --------------------------------------------------------
-with onglets[2]:
+# 4 — facteurs associés --------------------------------------------------------
+with onglets[3]:
     st.markdown("**Services WASH selon l'échelle JMP (OMS/UNICEF)**")
     def niveaux_wash():
         cats, series = ["Eau de boisson", "Assainissement", "Hygiène des mains"], {}
@@ -384,8 +495,8 @@ with onglets[2]:
         st.caption("Ratios bruts, sans ajustement : à interpréter comme une exploration, "
                    "avant la régression multivariée prévue dans le protocole.")
 
-# 4 — prise en charge ----------------------------------------------------------
-with onglets[3]:
+# 5 — prise en charge ----------------------------------------------------------
+with onglets[4]:
     if len(d) == 0:
         st.info("Aucun cas de diarrhée dans la sélection.")
     else:
@@ -414,8 +525,8 @@ with onglets[3]:
                                 "Premier recours aux soins", p, couleur=p["series"][0]),
                                 width="stretch")
 
-# 5 — connaissances ------------------------------------------------------------
-with onglets[4]:
+# 6 — connaissances ------------------------------------------------------------
+with onglets[5]:
     if "score_connaissances" in df:
         dist = df["score_connaissances"].value_counts().sort_index()
         a, b = st.columns([2, 1])
@@ -436,7 +547,7 @@ with onglets[4]:
                             "Score moyen de connaissances (en % du maximum) selon le niveau d'études du répondant", p,
                             couleur=p["series"][6]), width="stretch")
 
-# 6 — tableaux du mémoire -------------------------------------------------------
+# 7 — tableaux du mémoire -------------------------------------------------------
 def afficher_tableau(titre, t, note=""):
     st.markdown(f"**{titre}**")
     vis = [c for c in t.columns if not c.startswith("_")]
@@ -455,7 +566,7 @@ def afficher_tableau(titre, t, note=""):
 
 
 EXPORT = []
-with onglets[5]:
+with onglets[6]:
     st.markdown("Les tableaux du chapitre IV du mémoire, recalculés en direct sur les fiches sélectionnées "
                 "(les filtres en haut de page s'appliquent). Le bouton en bas de page télécharge tous les tableaux "
                 "dans un classeur Excel, un tableau par feuille, prêts à être copiés dans le mémoire.")
@@ -572,19 +683,24 @@ with onglets[5]:
                        file_name=f"tableaux_resultats_diarrhee_limete_{dt.date.today():%Y%m%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 
-# 7 — données ------------------------------------------------------------------
-with onglets[6]:
-    colonnes = [c for c in ["_id", "jour", "aire_sante", "a6", "enqueteur", "sexe", "b3", "tranche_age", "j1",
+# 8 — données ------------------------------------------------------------------
+with onglets[7]:
+    colonnes = [c for c in ["_id", "jour", "aire_sante", "a6", "enqueteur", "gps_statut", "sexe", "b3", "tranche_age", "j1",
                             "k4", "k5", "k7", "poids_final", "taille_final", "pb_final", "whz", "haz", "waz",
                             "score_biens", "score_connaissances", "duree_min"] if c in df]
     st.dataframe(df[colonnes], hide_index=True, width="stretch", height=460)
+    avec_gps = st.checkbox("Inclure les coordonnées GPS des ménages dans l'export", value=False,
+                           help="Les positions GPS identifient les ménages : ne les exporter que pour un usage interne, "
+                                "jamais dans un fichier partagé ou publié.")
+    GPS_COLS = ["a7_gps", "_geolocation", "lat", "lon", "gps_altitude", "gps_precision_m"]
+    export = df if avec_gps else df.drop(columns=[c for c in GPS_COLS if c in df.columns])
     tampon = io.BytesIO()
     with pd.ExcelWriter(tampon, engine="openpyxl") as w:
-        df.to_excel(w, index=False, sheet_name="donnees")
+        export.to_excel(w, index=False, sheet_name="donnees")
     st.download_button("Télécharger les données filtrées (Excel)", tampon.getvalue(),
                        file_name=f"donnees_diarrhee_limete_{dt.date.today():%Y%m%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    st.download_button("Télécharger les données filtrées (CSV)", df.to_csv(index=False).encode("utf-8"),
+    st.download_button("Télécharger les données filtrées (CSV)", export.to_csv(index=False).encode("utf-8"),
                        file_name=f"donnees_diarrhee_limete_{dt.date.today():%Y%m%d}.csv", mime="text/csv")
 
 st.caption(f"Dernière actualisation : {dt.datetime.now():%d/%m/%Y %H:%M} — "

@@ -7,7 +7,7 @@ interpolation linéaire entre deux points. Les résultats sont très proches de 
 """
 from __future__ import annotations
 
-VERSION_TDB = "5"  # doit correspondre à app.py
+VERSION_TDB = "6"  # doit correspondre à app.py
 import math
 import os
 from functools import lru_cache

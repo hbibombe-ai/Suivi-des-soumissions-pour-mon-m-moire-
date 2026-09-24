@@ -6,7 +6,7 @@ libellés à partir du XLSForm déposé dans le dépôt (version V7 du formulair
 """
 from __future__ import annotations
 
-VERSION_TDB = "5"  # doit correspondre à app.py
+VERSION_TDB = "6"  # doit correspondre à app.py
 import datetime as dt
 import random
 from typing import Dict, List
@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import requests
 
+import geo
 import nutrition
 
 SERVEURS = {
@@ -22,7 +23,8 @@ SERVEURS = {
     "Global (kf.kobotoolbox.org)": "https://kf.kobotoolbox.org",
     "OCHA (kobo.humanitarianresponse.info)": "https://kobo.humanitarianresponse.info",
 }
-XLSFORM = "KoboCollect_XLSForm_Diarrhee_Limete_2026_V7.xlsx"
+import os as _os
+XLSFORM = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "KoboCollect_XLSForm_Diarrhee_Limete_2026_V7.xlsx")
 TIMEOUT = 60
 
 AIRES = ["agricole", "industriel_1", "industriel_2", "industriel_3", "masiala", "mateba",
@@ -225,6 +227,9 @@ def preparer(brut: pd.DataFrame, dico: Dict[str, dict]) -> pd.DataFrame:
         mesure = (oed == 1) | pb.notna()
         df["malnutrition_aigue_pb"] = np.where(mesure, ((oed == 1) | (pb < 125)).astype(float), np.nan)
 
+    # --- Géolocalisation (A7) : coordonnées, précision, contrôle qualité ---------
+    df = geo.ajouter_gps(df)
+
     df["eligible"] = eligibilite(df)
     df = df[df["eligible"] == 1]
     return df.reset_index(drop=True)
@@ -306,7 +311,8 @@ def donnees_demo(n: int = 420, graine: int = 11) -> pd.DataFrame:
         lignes.append({
             "_id": 1000 + i, "_submission_time": t_sub, "a2": t_sub.date(),
             "el1": 1, "el2": rng.randint(6, 240), "el3": 1, "el4": 1, "eligible": 1,
-            "a3": f"ENQ{aire_i + 1:02d}", "a4": aire, "a6": f"M{i:04d}", "a8": rng.randint(3, 12), "a9": ch([1, 1, 2, 3]),
+            "a3": f"ENQ{aire_i + 1:02d}", "a4": aire, "a6": f"M{i:04d}",
+            "a7_gps": (None if rng.random() < 0.02 else "0 0 0 0" if rng.random() < 0.01 else geo.demo_gps(aire, rng)), "a8": rng.randint(3, 12), "a9": ch([1, 1, 2, 3]),
             "b1": sexe, "b2_connue": 1, "b3": age, "b4": ch([1, 2, 2, 3]), "b5": ch([1, 1, 2, 3, 4, 5]),
             "b6": ch([1, 1, 2, 3]), "b7": ch([1, 1, 1, 0, 9]),
             "c1": ch([1, 1, 1, 1, 2, 3, 4]), "c2": rng.randint(16, 48), "c3": ch([0, 1, 2, 2, 2, 3]),

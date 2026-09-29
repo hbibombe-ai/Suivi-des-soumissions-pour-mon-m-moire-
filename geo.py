@@ -28,20 +28,20 @@ CENTRES_DEMO = {
 }
 
 
-def _lire(valeur):
-    """'−4.37 15.33 280 5' ou [−4.37, 15.33] → (lat, lon, alt, précision)."""
-    if valeur is None or (isinstance(valeur, float) and math.isnan(valeur)):
-        return (np.nan,) * 4
-    if isinstance(valeur, (list, tuple, np.ndarray)):
-        parts = list(valeur)
-    else:
-        parts = str(valeur).replace(",", " ").split()
-    try:
-        nums = [float(x) for x in parts[:4]]
-    except ValueError:
-        return (np.nan,) * 4
-    nums += [np.nan] * (4 - len(nums))
-    return tuple(nums[:4])
+def _lire(v):
+    """Convertit une position Kobo (texte 'lat lon alt précision', liste [lat, lon] ou vide)
+    en 4 nombres ; renvoie des valeurs vides (NaN) si la fiche n'a pas de GPS."""
+    vide = [float("nan")] * 4
+    if v is None or (isinstance(v, float) and v != v):      # absent ou NaN
+        return vide
+    parts = v if isinstance(v, (list, tuple)) else str(v).split()
+    nums = []
+    for x in parts[:4]:
+        try:
+            nums.append(float(x))
+        except (TypeError, ValueError):                       # None, texte vide, etc.
+            nums.append(float("nan"))
+    return (nums + vide)[:4]
 
 
 def ajouter_gps(df: pd.DataFrame) -> pd.DataFrame:

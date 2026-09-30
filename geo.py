@@ -183,17 +183,28 @@ def localiser(lon, lat) -> pd.Series:
 
 
 # --------------------------------------------------------------------- GPS
-def _lire(valeur):
-    """'−4.37 15.33 280 5' ou [−4.37, 15.33] → (lat, lon, alt, précision)."""
-    if valeur is None or (isinstance(valeur, float) and math.isnan(valeur)):
-        return (np.nan,) * 4
-    if isinstance(valeur, (list, tuple, np.ndarray)):
-        parts = list(valeur)
-    else:
-        parts = str(valeur).replace(",", " ").split()
+def _nombre(x) -> float:
+    """Valeur numérique, ou NaN si vide, None, texte ou valeur invalide."""
     try:
-        nums = [float(x) for x in parts[:4]]
-    except ValueError:
+        v = float(x)
+    except (TypeError, ValueError):
+        return np.nan
+    return v if math.isfinite(v) else np.nan
+
+
+def _lire(valeur):
+    """'−4.37 15.33 280 5', [−4.37, 15.33] ou [None, None] → (lat, lon, alt, précision) ; NaN si absent."""
+    try:
+        if valeur is None or (isinstance(valeur, float) and math.isnan(valeur)):
+            return (np.nan,) * 4
+        if isinstance(valeur, (list, tuple, np.ndarray)):
+            parts = list(valeur)
+        elif isinstance(valeur, dict):  # certains exports : {"latitude": …, "longitude": …}
+            parts = [valeur.get("latitude"), valeur.get("longitude"), valeur.get("altitude"), valeur.get("accuracy")]
+        else:
+            parts = str(valeur).replace(",", " ").split()
+        nums = [_nombre(x) for x in parts[:4]]
+    except Exception:  # valeur inattendue : on la traite comme un GPS manquant plutôt que de bloquer l'application
         return (np.nan,) * 4
     nums += [np.nan] * (4 - len(nums))
     return tuple(nums[:4])
@@ -204,7 +215,8 @@ def ajouter_gps(df: pd.DataFrame) -> pd.DataFrame:
     brut = df["a7_gps"] if "a7_gps" in df.columns else pd.Series(np.nan, index=df.index)
     vals = pd.DataFrame([_lire(v) for v in brut], index=df.index, columns=["lat", "lon", "gps_altitude", "gps_precision_m"])
     if "_geolocation" in df.columns:  # secours : coordonnées extraites par KoboToolbox
-        secours = pd.DataFrame([_lire(v) for v in df["_geolocation"]], index=df.index).iloc[:, :2]
+        secours = pd.DataFrame([_lire(v) for v in df["_geolocation"]], index=df.index,
+                               columns=["lat", "lon", "alt", "prec"])[["lat", "lon"]].rename(columns={"lat": 0, "lon": 1})
         vals["lat"] = vals["lat"].fillna(secours[0])
         vals["lon"] = vals["lon"].fillna(secours[1])
     for c in vals.columns:

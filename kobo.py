@@ -6,7 +6,7 @@ libellés à partir du XLSForm déposé dans le dépôt (version V7 du formulair
 """
 from __future__ import annotations
 
-VERSION_TDB = "6"  # doit correspondre à app.py
+VERSION_TDB = "7"  # doit correspondre à app.py
 import datetime as dt
 import random
 from typing import Dict, List

@@ -5,7 +5,7 @@ L'adresse publique de l'application est lue dans les Secrets (`[app] url = "http
 """
 from __future__ import annotations
 
-VERSION_TDB = "6"  # doit correspondre à app.py
+VERSION_TDB = "7"  # doit correspondre à app.py
 import io
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 

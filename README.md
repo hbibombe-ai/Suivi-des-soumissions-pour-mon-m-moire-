@@ -13,7 +13,9 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | `kobo.py` | Connexion à l'API KoboToolbox, dictionnaire des variables, préparation des données |
 | `viz.py` | Thème graphique, intervalles de confiance, ratios de prévalence, graphiques |
 | `tableaux.py` | Tableaux du chapitre Résultats du mémoire (descriptifs, bivariés, régression logistique) et export Excel |
-| `geo.py` | Géolocalisation : lecture du GPS (A7), contrôle qualité, floutage, cartes |
+| `geo.py` | Géolocalisation : lecture du GPS (A7), contrôle qualité, floutage, cartes, carte sanitaire |
+| `carte_sanitaire/preparer_carte_sanitaire.R` | Crée `aires_limete.geojson` (limites des 11 aires de santé) à partir du shapefile DSNIS/GRID3 |
+| `carte_sanitaire/aires_limete.geojson` | Carte sanitaire de la ZS de Limete (à ajouter, voir section 6) |
 | `partage.py` | Partage : lien, lien vers la vue filtrée, QR code, WhatsApp, e-mail, SMS |
 | `nutrition.py` | Calcul des z-scores (normes de croissance OMS 2006) et classes d'état nutritionnel |
 | `who_lms.csv` | Tables de référence LMS de l'OMS (poids-pour-âge, taille-pour-âge, poids-pour-taille) |
@@ -95,15 +97,37 @@ Pour restreindre l'accès : Streamlit Cloud permet de limiter l'application à d
 
 L'onglet **Carte** exploite la question A7 (geopoint) :
 
-- **Qualité du GPS** : % de ménages géolocalisés, coordonnées manquantes, points hors de Limete, précision médiane ;
-  tableau par enquêteur et liste des fiches à vérifier (réglages de l'emprise et du seuil de précision dans `geo.py`).
-- **Trois vues** : *Ménages* (un point par ménage, couleur au choix : diarrhée, aire, enquêteur, qualité GPS),
-  *Concentration des cas* (carte de chaleur), *Synthèse par aire* (une bulle par aire, couleur = prévalence).
+- **Qualité du GPS** : % de ménages géolocalisés, coordonnées manquantes, points hors de la zone, précision médiane ;
+  tableau par enquêteur et liste des fiches à vérifier (seuil de précision dans `geo.py`).
+- **Trois vues** : *Ménages* (un point par ménage, couleur au choix : diarrhée, aire déclarée, aire selon le GPS,
+  enquêteur, qualité GPS), *Concentration des cas* (carte de chaleur), *Synthèse par aire*.
 - **Confidentialité** : les points sont **floutés par défaut** (déplacement stable de 50 à 150 m). La position exacte,
   le code ménage et l'enquêteur n'apparaissent qu'en activant *Position exacte (usage interne)*.
   Pour une présentation ou un partage, utiliser la vue *Synthèse par aire*, qui n'affiche aucun ménage.
 - Les exports de l'onglet *Données* **excluent les coordonnées GPS**, sauf si l'on coche l'option correspondante.
 - Fonds de carte OpenStreetMap (mode clair) ou CARTO (mode sombre) : une connexion internet est nécessaire.
+
+### Carte sanitaire de la ZS de Limete
+
+Avec le fichier `carte_sanitaire/aires_limete.geojson` (limites des 11 aires de santé), le tableau de bord :
+
+- trace les **limites et les noms des aires** sur toutes les cartes ;
+- remplace les bulles de la vue *Synthèse par aire* par une **carte des aires coloriées selon la prévalence**
+  (calculée sur tous les enfants enquêtés de l'aire déclarée, avec IC 95 % dans l'infobulle) ;
+- contrôle chaque point GPS : **hors de la ZS** (au-delà d'une tolérance de 100 m en limite de zone) ou situé dans une
+  **autre aire que l'aire déclarée** (A4). Ces ménages sont listés dans *Contrôle qualité GPS* pour vérification avec
+  l'enquêteur ; ils restent analysés selon l'aire déclarée.
+
+Créer le fichier une seule fois, avec R :
+
+1. Dans RStudio, choisir comme dossier de travail le dossier du mémoire, celui qui contient **Cartographie**
+   (*Session → Set Working Directory → Choose Directory…*).
+2. Ouvrir `carte_sanitaire/preparer_carte_sanitaire.R` et cliquer sur **Source**. Le script lit le shapefile
+   des aires de santé (DSNIS/GRID3), garde la ZS de Limete, harmonise les noms avec le formulaire
+   (Industrielle 1 → Industriel 1, Mfumu Mvula → Mfumu, Résidentielle → Résidentiel) et crée `aires_limete.geojson`.
+3. Copier ce fichier dans le dossier `carte_sanitaire/` du dépôt et l'envoyer sur GitHub : l'application se met à jour.
+
+Sans ce fichier, le tableau de bord fonctionne comme avant (contrôle par une emprise rectangulaire et bulles par aire).
 
 ## 7. Partager le tableau de bord
 

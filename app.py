@@ -22,7 +22,7 @@ st.set_page_config(page_title="Diarrhée < 5 ans — ZS Limete", page_icon="💧
                    layout="wide", initial_sidebar_state="expanded")
 
 # Contrôle de cohérence : tous les fichiers du dépôt doivent provenir de la même version
-VERSION_TDB = "6"
+VERSION_TDB = "7"
 try:
     import nutrition
     import tableaux as _t
@@ -308,17 +308,28 @@ with onglets[1]:
                   "pour protéger la confidentialité des ménages.")
     qual = df["gps_statut"].value_counts() if "gps_statut" in df else pd.Series(dtype=int)
     n_val = int(qual.get("Valide", 0))
-    k = st.columns(4, gap="small")
+    avec_carte = geo.carte_sanitaire() is not None
+    k = st.columns(5 if avec_carte else 4, gap="small")
     carte(k[0], "Ménages géolocalisés", f"{viz.fr(100 * n_val / len(df), 0)} %", f"{n_val} sur {len(df)} fiches", p["good"])
     carte(k[1], "GPS manquant", f"{int(qual.get('Manquant', 0))}", "fiches sans coordonnées", p["warn"])
-    carte(k[2], "Hors zone", f"{int(qual.get('Hors zone', 0))}", "points hors de Limete", p["bad"])
+    carte(k[2], "Hors zone", f"{int(qual.get('Hors zone', 0))}",
+          "points hors de la ZS (carte sanitaire)" if avec_carte else "points hors de Limete", p["bad"])
     carte(k[3], "Précision médiane",
           f"{viz.fr(df['gps_precision_m'].median(), 0)} m" if df.get("gps_precision_m", pd.Series(dtype=float)).notna().any() else "—",
           f"imprécis (> {geo.PRECISION_MAX_M} m) : {int(qual.get(f'Imprécis (> {geo.PRECISION_MAX_M} m)', 0))}", p["series"][0])
+    if avec_carte:
+        n_incoh = int((df.get("aire_coherente", pd.Series(dtype=float)) == 0).sum())
+        n_comp = int(df.get("aire_coherente", pd.Series(dtype=float)).notna().sum())
+        carte(k[4], "Aire GPS ≠ aire déclarée", f"{n_incoh}", f"sur {n_comp} ménages localisés dans la ZS", p["warn"])
+    else:
+        st.caption("Carte sanitaire non chargée : ajouter le fichier `carte_sanitaire/aires_limete.geojson` "
+                   "(voir `carte_sanitaire/preparer_carte_sanitaire.R`) pour afficher les limites des aires, "
+                   "la carte de prévalence par aire et le contrôle « aire GPS / aire déclarée ».")
 
     o1, o2, o3 = st.columns([1.4, 1.4, 1.2])
     vue = o1.radio("Affichage", ["Ménages", "Concentration des cas", "Synthèse par aire"], horizontal=True)
-    couleur_par = o2.selectbox("Couleur des points", ["Diarrhée (14 j)", "Aire de santé", "Enquêteur", "Qualité GPS"],
+    couleur_par = o2.selectbox("Couleur des points", ["Diarrhée (14 j)", "Aire de santé"]
+                               + (["Aire selon le GPS"] if avec_carte else []) + ["Enquêteur", "Qualité GPS"],
                                disabled=vue != "Ménages")
     exact = o3.toggle("Position exacte (usage interne)", value=False,
                       help="Désactivé : chaque point est déplacé de 50 à 150 m au hasard (déplacement stable), "
@@ -332,11 +343,15 @@ with onglets[1]:
             pts = geo.flouter(pts, 150)
         pts["Diarrhée (14 j)"] = pts["j1"].map({1: "Cas de diarrhée", 0: "Pas de diarrhée"}).fillna("Non renseigné")
         pts["Aire de santé"] = pts["aire_sante"]
+        if avec_carte:
+            pts["Aire selon le GPS"] = pts["aire_gps"].fillna("—")
         pts["Enquêteur"] = pts.get("enqueteur", "—")
         pts["Qualité GPS"] = pts["gps_statut"]
         pts["jour_txt"] = pd.to_datetime(pts["jour"]).dt.strftime("%d/%m/%Y")
         pts["prec_txt"] = pts["gps_precision_m"].map(lambda v: f"{v:.0f} m" if pd.notna(v) else "—")
         infob = [("Aire", "aire_sante"), ("Diarrhée", "Diarrhée (14 j)"), ("Âge", "tranche_age"), ("Collecte", "jour_txt")]
+        if avec_carte:
+            infob.insert(1, ("Aire selon le GPS", "Aire selon le GPS"))
         if exact:
             infob += [("Ménage", "a6"), ("Enquêteur", "enqueteur"), ("Précision", "prec_txt")]
         if vue == "Ménages":
@@ -352,6 +367,18 @@ with onglets[1]:
                             width="stretch", config={"scrollZoom": True})
             st.caption("Les zones chaudes montrent où les cas sont nombreux, pas où le risque est élevé : "
                        "elles reflètent aussi la densité des ménages enquêtés. Comparer avec la prévalence par aire.")
+        elif avec_carte:
+            lignes_aires = []
+            for aire_, g_ in df.dropna(subset=["aire_sante"]).groupby("aire_sante"):
+                k_ = int((g_["j1"] == 1).sum())
+                v_, b_, h_ = viz.wilson(k_, len(g_))
+                lignes_aires.append(dict(aire=aire_, n=len(g_), cas=k_, prevalence=v_, ic_bas=b_, ic_haut=h_))
+            agg = pd.DataFrame(lignes_aires)
+            st.plotly_chart(geo.carte_aires_polygones(agg, p, sombre, "Prévalence de la diarrhée par aire de santé"),
+                            width="stretch", config={"scrollZoom": True})
+            st.caption("Chaque aire est coloriée selon la prévalence calculée sur tous les enfants enquêtés de l'aire "
+                       "déclarée (A4), géolocalisés ou non ; « n.d. » : aucune fiche dans la sélection. "
+                       "Aucune position de ménage n'est affichée : c'est la vue à privilégier pour une présentation ou un partage.")
         else:
             agg = (pts.assign(cas=(pts["j1"] == 1).astype(int))
                       .groupby("aire_sante").agg(lat=("lat", "median"), lon=("lon", "median"), n=("cas", "size"), cas=("cas", "sum"))
@@ -380,9 +407,23 @@ with onglets[1]:
                          .rename(columns={"_id": "Fiche", "jour": "Date", "enqueteur": "Enquêteur", "aire_sante": "Aire",
                                           "a6": "Ménage", "gps_statut": "Statut GPS", "gps_precision_m": "Précision (m)"}),
                          hide_index=True, width="stretch")
-        st.caption(f"Contrôle : point dans l'emprise de Limete (lat. {geo.EMPRISE['lat_min']} à {geo.EMPRISE['lat_max']}, "
-                   f"long. {geo.EMPRISE['lon_min']} à {geo.EMPRISE['lon_max']}) et précision ≤ {geo.PRECISION_MAX_M} m. "
-                   "Réglages modifiables dans geo.py.")
+        if avec_carte and "aire_coherente" in df:
+            incoh = df[df["aire_coherente"] == 0]
+            if len(incoh):
+                st.markdown(f"**{len(incoh)} ménage(s) localisé(s) dans une autre aire que l'aire déclarée**")
+                st.dataframe(incoh[[c for c in ["_id", "jour", "enqueteur", "a6", "aire_sante", "aire_gps"] if c in incoh]]
+                             .rename(columns={"_id": "Fiche", "jour": "Date", "enqueteur": "Enquêteur", "a6": "Ménage",
+                                              "aire_sante": "Aire déclarée (A4)", "aire_gps": "Aire selon le GPS"}),
+                             hide_index=True, width="stretch")
+                st.caption("À vérifier avec l'enquêteur : erreur de saisie de l'aire, GPS relevé ailleurs, "
+                           "ou ménage situé en limite d'aire. Ces fiches restent dans l'analyse selon l'aire déclarée.")
+            st.caption(f"Contrôle : point dans une aire de santé de la ZS de Limete selon la carte sanitaire "
+                       f"(tolérance {geo.TOLERANCE_M} m en limite de zone) et précision ≤ {geo.PRECISION_MAX_M} m. "
+                       "Réglages modifiables dans geo.py.")
+        else:
+            st.caption(f"Contrôle : point dans l'emprise de Limete (lat. {geo.EMPRISE['lat_min']} à {geo.EMPRISE['lat_max']}, "
+                       f"long. {geo.EMPRISE['lon_min']} à {geo.EMPRISE['lon_max']}) et précision ≤ {geo.PRECISION_MAX_M} m. "
+                       "Réglages modifiables dans geo.py.")
 
 
 # 3 — profil épidémiologique ---------------------------------------------------

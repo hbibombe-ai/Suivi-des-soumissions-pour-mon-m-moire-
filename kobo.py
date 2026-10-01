@@ -180,6 +180,8 @@ def preparer(brut: pd.DataFrame, dico: Dict[str, dict]) -> pd.DataFrame:
     df["jour"] = pd.to_datetime(df["date_collecte"], errors="coerce").dt.date
     if {"start", "end"}.issubset(df.columns):
         df["duree_min"] = (df["end"] - df["start"]).dt.total_seconds() / 60
+        # > 3 h : formulaire ouvert avant la visite ou modifié après l'envoi (la fin est alors l'heure de la modification)
+        df.loc[(df["duree_min"] > 180) | (df["duree_min"] < 0), "duree_min"] = np.nan
 
     # Libellés lisibles
     for var, cible in [("a4", "aire_sante"), ("b1", "sexe"), ("c3", "niveau_etudes"),

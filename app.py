@@ -298,6 +298,7 @@ with onglets[0]:
             pe["fiches"].tolist(), "Répartition des fiches par enquêteur", p), width="stretch")
         if "duree_min" in df:
             g4.markdown("**Durée médiane d'entretien par enquêteur**")
+            g4.caption("Durées de plus de 3 h exclues : formulaire ouvert avant la visite ou modifié après l'envoi.")
             g4.dataframe(pe.rename(columns={"enqueteur": "Enquêteur", "fiches": "Fiches", "duree": "Durée médiane (min)"})
                          .round(1), hide_index=True, width="stretch")
 
@@ -699,8 +700,11 @@ with onglets[6]:
         retenues = st.multiselect("Variables du modèle", list(E), default=defaut, label_visibility="collapsed")
         st.session_state["vars_modele"] = retenues
     retenues = st.session_state.get("vars_modele", defaut)
-    t22, info = (tableaux.regression_logistique(df, {k: E[k] for k in retenues}) if retenues
-                 else (pd.DataFrame(), {"erreur": "Aucune variable sélectionnée."}))
+    try:
+        t22, info = (tableaux.regression_logistique(df, {k: E[k] for k in retenues}) if retenues
+                     else (pd.DataFrame(), {"erreur": "Aucune variable sélectionnée."}))
+    except Exception as e:  # noqa: BLE001 — ne jamais bloquer le tableau de bord à cause du modèle
+        t22, info = pd.DataFrame(), {"erreur": f"Modèle non calculable pour le moment ({type(e).__name__})."}
     n22 = ("ORa : odds ratio ajusté ; IC 95 % : intervalle de confiance à 95 %. "
            + (f"n = {info['n']} enfants, {info['cas']} cas. Hosmer-Lemeshow : χ² = {viz.fr(info['hl'][0], 2)} ; ddl = {info['hl'][1]} ; "
               f"p = {tableaux.fmt_p(info['hl'][2])}. Pseudo-R² de McFadden = {viz.fr(info['pseudo_r2'], 3)}." if "hl" in info else ""))
@@ -709,6 +713,8 @@ with onglets[6]:
         if "erreur" in info:
             st.warning(info["erreur"])
         else:
+            if "avertissement" in info:
+                st.info(info["avertissement"])
             afficher_tableau(titre22, t22, n22)
             st.plotly_chart(viz.points_ratios(t22["Variables (exposé vs non exposé)"].tolist(), t22["_ora"].tolist(),
                                               t22["_lo"].tolist(), t22["_hi"].tolist(), "Odds ratios ajustés (IC 95 %)", p,

@@ -9,6 +9,7 @@ from __future__ import annotations
 VERSION_TDB = "7"  # doit correspondre à app.py
 import io
 import math
+import warnings
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -188,20 +189,37 @@ def regression_logistique(df: pd.DataFrame, expositions: Dict[str, pd.Series], i
     if len(y) < 30 or X.shape[1] == 0 or y.sum() < 5:
         return pd.DataFrame(), {"erreur": "Effectifs insuffisants pour ajuster le modèle."}
     Xc = sm.add_constant(X, has_constant="add")
+    cas = int(y.sum())
     try:
-        m = sm.Logit(y, Xc).fit(disp=0, maxiter=200)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            m = sm.Logit(y, Xc).fit(disp=0, maxiter=200)
     except Exception as e:  # noqa: BLE001 — séparation parfaite, colinéarité…
-        return pd.DataFrame(), {"erreur": f"Le modèle n'a pas convergé ({e})."}
+        return pd.DataFrame(), {"erreur": f"Le modèle n'a pas pu être ajusté avec {cas} cas ({type(e).__name__}). "
+                                          "Retirer des variables ou attendre davantage de données."}
     ci = m.conf_int()
+    # Séparation (quasi) complète : une exposition prédit parfaitement l'issue, les coefficients explosent
+    instables = [v for v in X.columns
+                 if not np.isfinite(m.bse[v]) or abs(m.params[v]) > 10 or not np.isfinite(ci.loc[v]).all()
+                 or max(abs(ci.loc[v, 0]), abs(ci.loc[v, 1])) > 12]
+    if instables or not m.mle_retvals.get("converged", True):
+        return pd.DataFrame(), {"erreur": f"Modèle non estimable avec seulement {cas} cas de diarrhée : "
+                                          + (f"la ou les variables « {', '.join(instables)} » séparent parfaitement les cas "
+                                             "(aucun cas chez les exposés ou les non-exposés). " if instables else "")
+                                          + "Retirer ces variables ou attendre davantage de données."}
+    ex = lambda x: math.exp(min(float(x), 700.0))
     rows = []
     for v in X.columns:
-        rows.append({"Variables (exposé vs non exposé)": v, "ORa": viz.fr(math.exp(m.params[v]), 2),
-                     "IC à 95 %": f"{viz.fr(math.exp(ci.loc[v, 0]), 2)} – {viz.fr(math.exp(ci.loc[v, 1]), 2)}",
-                     "p": fmt_p(m.pvalues[v]), "_ora": math.exp(m.params[v]),
-                     "_lo": math.exp(ci.loc[v, 0]), "_hi": math.exp(ci.loc[v, 1])})
+        rows.append({"Variables (exposé vs non exposé)": v, "ORa": viz.fr(ex(m.params[v]), 2),
+                     "IC à 95 %": f"{viz.fr(ex(ci.loc[v, 0]), 2)} – {viz.fr(ex(ci.loc[v, 1]), 2)}",
+                     "p": fmt_p(m.pvalues[v]), "_ora": ex(m.params[v]),
+                     "_lo": ex(ci.loc[v, 0]), "_hi": ex(ci.loc[v, 1])})
     chi, ddl, p_hl = hosmer_lemeshow(y.values, m.predict(Xc).values)
-    return pd.DataFrame(rows), {"n": int(len(y)), "cas": int(y.sum()), "hl": (chi, ddl, p_hl),
-                                "pseudo_r2": m.prsquared}
+    info = {"n": int(len(y)), "cas": cas, "hl": (chi, ddl, p_hl), "pseudo_r2": m.prsquared}
+    if cas < 10 * X.shape[1]:
+        info["avertissement"] = (f"{cas} cas pour {X.shape[1]} variable(s) : moins de 10 cas par variable, "
+                                 "les ORa sont instables. Résultats à n'interpréter qu'en fin de collecte.")
+    return pd.DataFrame(rows), info
 
 
 # ======================================================================= variables

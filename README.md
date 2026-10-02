@@ -128,6 +128,12 @@ Créer le fichier une seule fois, avec R :
    (Industrielle 1 → Industriel 1, Mfumu Mvula → Mfumu, Résidentielle → Résidentiel) et crée `aires_limete.geojson`.
 3. Copier ce fichier dans le dossier `carte_sanitaire/` du dépôt et l'envoyer sur GitHub : l'application se met à jour.
 
+Ou directement depuis QGIS : clic droit sur la couche des aires de la ZS de Limete → **Exporter → Sauvegarder les
+entités sous…**, format **GeoJSON**, SCR **EPSG:4326 – WGS 84**, nom `aires_limete.geojson`. Les noms officiels
+(champ `AS_`, `Aire_Sante`, `Nom`…) sont reconnus. Le fichier peut être déposé dans `carte_sanitaire/` ou
+directement à la racine du dépôt. En mode démonstration, les ménages fictifs sont alors placés à l'intérieur
+des limites réelles de leur aire.
+
 Sans ce fichier, le tableau de bord fonctionne comme avant (contrôle par une emprise rectangulaire et bulles par aire).
 
 ## 7. Partager le tableau de bord

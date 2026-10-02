@@ -17,6 +17,7 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | `carte_sanitaire/preparer_carte_sanitaire.R` | Crée `aires_limete.geojson` (limites des 11 aires de santé) à partir du shapefile DSNIS/GRID3 |
 | `carte_sanitaire/aires_limete.geojson` | Carte sanitaire de la ZS de Limete (à ajouter, voir section 6) |
 | `partage.py` | Partage : lien, lien vers la vue filtrée, QR code, WhatsApp, e-mail, SMS |
+| `modele_multivarie.py` | Garde-fou EPV du modèle multivarié (cas disponibles / nécessaires, projection en fin de collecte) et régression logistique pénalisée de Firth |
 | `nutrition.py` | Calcul des z-scores (normes de croissance OMS 2006) et classes d'état nutritionnel |
 | `who_lms.csv` | Tables de référence LMS de l'OMS (poids-pour-âge, taille-pour-âge, poids-pour-taille) |
 | `KoboCollect_XLSForm_Diarrhee_Limete_2026_V7.xlsx` | Le formulaire : sert de dictionnaire (codes → libellés) |
@@ -169,6 +170,7 @@ il suffit de modifier le fichier : l'application se redéploie automatiquement.
 - Seules les fiches avec `eligible = 1` (résidence ≥ 6 mois, enfant éligible, consentement) sont retenues ; le tableau 5 utilise toutes les fiches envoyées.
 - **z-scores** : méthode LMS de l'OMS (correction au-delà de ±3 z pour les indices fondés sur le poids), âge exact calculé à partir des dates de naissance et d'enquête, correction de 0,7 cm si la position de mesure ne correspond pas à l'âge, exclusion des valeurs biologiquement invraisemblables. Validé sur les données de test de WHO Anthro (écart moyen 0,005 z) ; les chiffres définitifs du mémoire restent à confirmer avec WHO Anthro.
 - **Odds ratios bruts** : méthode de Woolf (correction de Haldane si une cellule est nulle). Le modèle multivarié de l'application est exploratoire : il ne remplace pas la construction pas à pas du modèle final.
+- **Modèle multivarié (Tableau 22)** : affiché seulement quand le nombre de cas atteint 10 par variable (règle stricte, Peduzzi 1996) ou 5 par variable (règle assouplie, Vittinghoff et McCulloch 2007), au choix dans l'onglet. Sous le seuil, l'onglet indique les cas manquants, le nombre de fiches et la date estimée pour l'atteindre, et le nombre maximal de variables possible avec les 427 ménages prévus. Si une exposition sépare parfaitement les cas ou si le modèle ne converge pas, l'application bascule sur la régression pénalisée de Firth (IC à 95 % et p par vraisemblance pénalisée profilée, comme `logistf` en R).
 - Données collectées avec l'ancienne version V3 du formulaire : les noms de variables sont convertis automatiquement vers la V7.
 - Les données sont mises en cache **5 minutes** ; le bouton *Actualiser* force la relecture.
 

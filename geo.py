@@ -12,7 +12,7 @@ Sans ce fichier, le tableau de bord fonctionne comme avant (emprise rectangulair
 """
 from __future__ import annotations
 
-VERSION_TDB = "7"  # doit correspondre à app.py
+VERSION_TDB = "8"  # doit correspondre à app.py
 import functools
 import hashlib
 import json

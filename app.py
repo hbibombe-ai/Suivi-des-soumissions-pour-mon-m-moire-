@@ -22,12 +22,14 @@ st.set_page_config(page_title="Diarrhée < 5 ans — ZS Limete", page_icon="💧
                    layout="wide", initial_sidebar_state="expanded")
 
 # Contrôle de cohérence : tous les fichiers du dépôt doivent provenir de la même version
-VERSION_TDB = "7"
+VERSION_TDB = "8"
 try:
+    import modele_multivarie
     import nutrition
     import tableaux as _t
     _perimes = [nom for nom, mod in (("kobo.py", kobo), ("tableaux.py", _t), ("nutrition.py", nutrition), ("viz.py", viz),
-                                      ("geo.py", geo), ("partage.py", partage))
+                                      ("geo.py", geo), ("partage.py", partage),
+                                      ("modele_multivarie.py", modele_multivarie))
                 if getattr(mod, "VERSION_TDB", None) != VERSION_TDB]
 except ImportError as _e:
     _perimes = [f"{_e.name}.py (fichier absent)"]
@@ -694,25 +696,57 @@ with onglets[6]:
 
     p_bi = {nom: tableaux.p_bivarie(df, s_) for nom, s_ in E.items()}
     defaut = [n_ for n_, pv in p_bi.items() if pv == pv and pv < 0.20]
+    REGLES_EPV = {"Stricte : 10 cas par variable": 10, "Assouplie : 5 cas par variable": 5}
     if rendu("Modèle multivarié"):
         st.markdown("**Choix des variables du modèle** — présélection automatique des expositions avec p < 0,20 "
                     "en analyse bivariée ; ajouter les variables importantes sur le plan conceptuel.")
         retenues = st.multiselect("Variables du modèle", list(E), default=defaut, label_visibility="collapsed")
         st.session_state["vars_modele"] = retenues
+        regle = st.radio("Nombre minimal de cas par variable (EPV)", list(REGLES_EPV), horizontal=True,
+                         index=0 if st.session_state.get("seuil_epv", 10) == 10 else 1,
+                         help="Le modèle multivarié ne s'affiche que lorsque ce seuil est atteint. Règle stricte : "
+                              "Peduzzi et al. (1996) ; règle assouplie : Vittinghoff et McCulloch (2007).")
+        st.session_state["seuil_epv"] = REGLES_EPV[regle]
     retenues = st.session_state.get("vars_modele", defaut)
+    seuil_epv = st.session_state.get("seuil_epv", 10)
     try:
-        t22, info = (tableaux.regression_logistique(df, {k: E[k] for k in retenues}) if retenues
+        t22, info = (tableaux.regression_logistique(df, {k: E[k] for k in retenues}, seuil_epv=seuil_epv) if retenues
                      else (pd.DataFrame(), {"erreur": "Aucune variable sélectionnée."}))
     except Exception as e:  # noqa: BLE001 — ne jamais bloquer le tableau de bord à cause du modèle
         t22, info = pd.DataFrame(), {"erreur": f"Modèle non calculable pour le moment ({type(e).__name__})."}
-    n22 = ("ORa : odds ratio ajusté ; IC 95 % : intervalle de confiance à 95 %. "
-           + (f"n = {info['n']} enfants, {info['cas']} cas. Hosmer-Lemeshow : χ² = {viz.fr(info['hl'][0], 2)} ; ddl = {info['hl'][1]} ; "
-              f"p = {tableaux.fmt_p(info['hl'][2])}. Pseudo-R² de McFadden = {viz.fr(info['pseudo_r2'], 3)}." if "hl" in info else ""))
+
+    def note22(inf):
+        if "hl" not in inf:
+            return "ORa : odds ratio ajusté ; IC 95 % : intervalle de confiance à 95 %."
+        firth_ = inf.get("methode") == "Firth"
+        return ("ORa : odds ratio ajusté ; IC 95 % : intervalle de confiance à 95 %"
+                + (", par vraisemblance pénalisée profilée" if firth_ else "") + ". "
+                + ("Régression logistique pénalisée de Firth. " if firth_ else "")
+                + f"n = {inf['n']} enfants, {inf['cas']} cas ; EPV = {viz.fr(inf['epv'].epv, 1)}. "
+                + f"Hosmer-Lemeshow : χ² = {viz.fr(inf['hl'][0], 2)} ; ddl = {inf['hl'][1]} ; p = {tableaux.fmt_p(inf['hl'][2])}."
+                + (f" Pseudo-R² de McFadden = {viz.fr(inf['pseudo_r2'], 3)}." if inf.get("pseudo_r2") is not None else ""))
+    n22 = note22(info)
     titre22 = "Tableau 22 : Facteurs indépendamment associés à la diarrhée : régression logistique multivariée"
     if rendu("Modèle multivarié"):
-        if "erreur" in info:
+        if "epv" in info:
+            modele_multivarie.afficher_garde_fou(info["epv"])
+        if info.get("bloque"):
+            if st.checkbox("Afficher quand même un aperçu exploratoire (Firth) — non interprétable, non exporté"):
+                try:
+                    t_ap, i_ap = tableaux.regression_logistique(df, {k: E[k] for k in retenues}, apercu=True)
+                except Exception as e:  # noqa: BLE001
+                    t_ap, i_ap = pd.DataFrame(), {"erreur": f"Aperçu non calculable ({type(e).__name__})."}
+                if "erreur" in i_ap:
+                    st.error(i_ap["erreur"])
+                else:
+                    st.dataframe(t_ap[[c for c in t_ap.columns if not c.startswith("_")]], hide_index=True)
+                    st.caption("Aperçu exploratoire : à ne pas reporter dans le mémoire tant que le seuil n'est pas atteint. "
+                               + note22(i_ap))
+        elif "erreur" in info:
             st.warning(info["erreur"])
         else:
+            if "firth" in info:
+                st.info(info["firth"])
             if "avertissement" in info:
                 st.info(info["avertissement"])
             afficher_tableau(titre22, t22, n22)

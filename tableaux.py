@@ -6,7 +6,7 @@ et modèle de régression logistique multivariée (ORa [IC 95 %], p, test de Hos
 """
 from __future__ import annotations
 
-VERSION_TDB = "7"  # doit correspondre à app.py
+VERSION_TDB = "8"  # doit correspondre à app.py
 import io
 import math
 import warnings
@@ -178,47 +178,97 @@ def hosmer_lemeshow(y, p, g=10):
     return chi, ddl, 1 - stats.chi2.cdf(chi, ddl)
 
 
-def regression_logistique(df: pd.DataFrame, expositions: Dict[str, pd.Series], issue="j1"):
-    """Régression logistique sur des expositions binaires (1 = exposé). Renvoie (tableau, infos)."""
+def _fmt_or(x: float) -> str:
+    if x != x:
+        return "–"
+    if math.isinf(x):
+        return "∞"
+    if 0 < x < 0.01:
+        return "< 0,01"
+    return viz.fr(x, 2)
+
+
+def regression_logistique(df: pd.DataFrame, expositions: Dict[str, pd.Series], issue="j1",
+                          seuil_epv: int = 10, apercu: bool = False):
+    """Régression logistique sur des expositions binaires (1 = exposé). Renvoie (tableau, infos).
+
+    - Garde-fou EPV : tant que le nombre de cas est inférieur à `seuil_epv` × nombre de variables,
+      le modèle n'est pas ajusté (infos["bloque"] = True, infos["epv"] = état du garde-fou).
+    - Si le modèle classique ne converge pas ou qu'une exposition sépare les cas,
+      bascule automatique vers la régression pénalisée de Firth.
+    - `apercu=True` : ignore le garde-fou et force Firth (aperçu exploratoire, jamais exporté).
+    """
     import statsmodels.api as sm
+    import modele_multivarie as mv
     X = pd.DataFrame(expositions).astype(float)
     y = col(df, issue)
     ok = X.notna().all(axis=1) & y.isin([0, 1])
     X, y = X[ok], y[ok].astype(int)
     X = X.loc[:, X.std() > 0]
-    if len(y) < 30 or X.shape[1] == 0 or y.sum() < 5:
+    if X.shape[1] == 0 or len(y) < 10:
         return pd.DataFrame(), {"erreur": "Effectifs insuffisants pour ajuster le modèle."}
-    Xc = sm.add_constant(X, has_constant="add")
     cas = int(y.sum())
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            m = sm.Logit(y, Xc).fit(disp=0, maxiter=200)
-    except Exception as e:  # noqa: BLE001 — séparation parfaite, colinéarité…
-        return pd.DataFrame(), {"erreur": f"Le modèle n'a pas pu être ajusté avec {cas} cas ({type(e).__name__}). "
-                                          "Retirer des variables ou attendre davantage de données."}
-    ci = m.conf_int()
-    # Séparation (quasi) complète : une exposition prédit parfaitement l'issue, les coefficients explosent
-    instables = [v for v in X.columns
-                 if not np.isfinite(m.bse[v]) or abs(m.params[v]) > 10 or not np.isfinite(ci.loc[v]).all()
-                 or max(abs(ci.loc[v, 0]), abs(ci.loc[v, 1])) > 12]
-    if instables or not m.mle_retvals.get("converged", True):
-        return pd.DataFrame(), {"erreur": f"Modèle non estimable avec seulement {cas} cas de diarrhée : "
-                                          + (f"la ou les variables « {', '.join(instables)} » séparent parfaitement les cas "
-                                             "(aucun cas chez les exposés ou les non-exposés). " if instables else "")
-                                          + "Retirer ces variables ou attendre davantage de données."}
-    ex = lambda x: math.exp(min(float(x), 700.0))
+    dates = df.loc[y.index, "date_collecte"] if "date_collecte" in df.columns else None
+    etat = mv.calculer_epv(y, X.shape[1], seuil_epv, dates=dates)
+    if not etat.atteint and not apercu:
+        return pd.DataFrame(), {"erreur": mv.message_seuil(etat), "bloque": True, "epv": etat}
+    if min(cas, len(y) - cas) < 2:
+        return pd.DataFrame(), {"erreur": "Trop peu de cas pour estimer un modèle, même pénalisé.", "epv": etat}
+
+    Xc = sm.add_constant(X, has_constant="add")
+    methode, motif = "MLE", ""
+    if apercu:
+        methode = "Firth"
+    else:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                m = sm.Logit(y, Xc).fit(disp=0, maxiter=200)
+            ci = m.conf_int()
+            # Séparation (quasi) complète : une exposition prédit parfaitement l'issue, les coefficients explosent
+            instables = [v for v in X.columns
+                         if not np.isfinite(m.bse[v]) or abs(m.params[v]) > 10 or not np.isfinite(ci.loc[v]).all()
+                         or max(abs(ci.loc[v, 0]), abs(ci.loc[v, 1])) > 12]
+            if instables:
+                # désigner en priorité les expositions dont le tableau 2×2 contient une cellule vide
+                vides = [v for v in X.columns if (pd.crosstab(X[v], y).reindex(index=[0.0, 1.0], columns=[0, 1],
+                                                                                 fill_value=0).values == 0).any()]
+                fautives = vides or instables
+                methode, motif = "Firth", (f"la ou les variables « {', '.join(fautives)} » séparent parfaitement "
+                                           "les cas (aucun cas, ou aucun non-cas, chez les exposés ou les non-exposés)")
+            elif not m.mle_retvals.get("converged", True):
+                methode, motif = "Firth", "le modèle classique ne converge pas"
+        except Exception as e:  # noqa: BLE001 — séparation parfaite, colinéarité…
+            methode, motif = "Firth", f"le modèle classique n'a pas pu être ajusté ({type(e).__name__})"
+
+    ex = lambda x: math.exp(max(min(float(x), 700.0), -700.0))
     rows = []
-    for v in X.columns:
-        rows.append({"Variables (exposé vs non exposé)": v, "ORa": viz.fr(ex(m.params[v]), 2),
-                     "IC à 95 %": f"{viz.fr(ex(ci.loc[v, 0]), 2)} – {viz.fr(ex(ci.loc[v, 1]), 2)}",
-                     "p": fmt_p(m.pvalues[v]), "_ora": ex(m.params[v]),
-                     "_lo": ex(ci.loc[v, 0]), "_hi": ex(ci.loc[v, 1])})
-    chi, ddl, p_hl = hosmer_lemeshow(y.values, m.predict(Xc).values)
-    info = {"n": int(len(y)), "cas": cas, "hl": (chi, ddl, p_hl), "pseudo_r2": m.prsquared}
-    if cas < 10 * X.shape[1]:
-        info["avertissement"] = (f"{cas} cas pour {X.shape[1]} variable(s) : moins de 10 cas par variable, "
-                                 "les ORa sont instables. Résultats à n'interpréter qu'en fin de collecte.")
+    if methode == "MLE":
+        for v in X.columns:
+            rows.append({"Variables (exposé vs non exposé)": v, "ORa": _fmt_or(ex(m.params[v])),
+                         "IC à 95 %": f"{_fmt_or(ex(ci.loc[v, 0]))} – {_fmt_or(ex(ci.loc[v, 1]))}",
+                         "p": fmt_p(m.pvalues[v]), "_ora": ex(m.params[v]),
+                         "_lo": ex(ci.loc[v, 0]), "_hi": ex(ci.loc[v, 1])})
+        proba, pseudo_r2 = m.predict(Xc).values, m.prsquared
+    else:
+        f = mv.firth(X, y)
+        for v in X.columns:
+            lo, hi = f["ic"][v]
+            lo_, hi_ = (0.0 if np.isneginf(lo) else ex(lo)), (math.inf if np.isposinf(hi) else ex(hi))
+            rows.append({"Variables (exposé vs non exposé)": v, "ORa": _fmt_or(ex(f["params"][v])),
+                         "IC à 95 %": f"{_fmt_or(lo_) if lo_ > 0 else '0'} – {_fmt_or(hi_)}",
+                         "p": fmt_p(f["p"][v]), "_ora": ex(f["params"][v]),
+                         "_lo": max(lo_, 1e-3), "_hi": min(hi_, 1e3)})  # bornes plafonnées pour le graphique
+        proba, pseudo_r2 = f["proba"], None
+    chi, ddl, p_hl = hosmer_lemeshow(y.values, proba)
+    info = {"n": int(len(y)), "cas": cas, "hl": (chi, ddl, p_hl), "pseudo_r2": pseudo_r2,
+            "methode": methode, "epv": etat, "apercu": apercu}
+    if methode == "Firth" and not apercu:
+        info["firth"] = ("Régression logistique pénalisée de Firth utilisée : " + motif + ". Les ORa restent "
+                         "estimables ; IC à 95 % et p calculés par vraisemblance pénalisée profilée.")
+    if etat.epv < 10 and not apercu:
+        info["avertissement"] = (f"{etat.evenements} cas pour {X.shape[1]} variable(s) (EPV = {viz.fr(etat.epv, 1)}) : "
+                                 "règle assouplie (5 à 9 cas par variable), à signaler dans les limites de l'étude.")
     return pd.DataFrame(rows), info
 
 

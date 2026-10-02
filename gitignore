@@ -1,0 +1,4 @@
+# Exports Kobo (données personnelles) : ne jamais les publier
+*.xlsx
+!KoboCollect_XLSForm_*.xlsx
+__pycache__/

@@ -17,6 +17,7 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | `carte_sanitaire/preparer_carte_sanitaire.R` | Crée `aires_limete.geojson` (limites des 11 aires de santé) à partir du shapefile DSNIS/GRID3 |
 | `carte_sanitaire/aires_limete.geojson` | Carte sanitaire de la ZS de Limete (à ajouter, voir section 6) |
 | `partage.py` | Partage : lien, lien vers la vue filtrée, QR code, WhatsApp, e-mail, SMS |
+| `calibrer_demo.py` / `calibrage_demo.json` | Calage du mode démonstration sur un export réel (agrégats seulement) |
 | `modele_multivarie.py` | Garde-fou EPV du modèle multivarié (cas disponibles / nécessaires, projection en fin de collecte) et régression logistique pénalisée de Firth |
 | `nutrition.py` | Calcul des z-scores (normes de croissance OMS 2006) et classes d'état nutritionnel |
 | `who_lms.csv` | Tables de référence LMS de l'OMS (poids-pour-âge, taille-pour-âge, poids-pour-taille) |
@@ -135,6 +136,24 @@ directement à la racine du dépôt. En mode démonstration, les ménages fictif
 des limites réelles de leur aire.
 
 Sans ce fichier, le tableau de bord fonctionne comme avant (contrôle par une emprise rectangulaire et bulles par aire).
+
+### Mode démonstration calé sur le terrain
+
+Le mode démonstration simule les **427 ménages** prévus. Si `calibrage_demo.json` est présent, chaque question
+est tirée selon les réponses observées sur le terrain, la prévalence de la diarrhée est calée sur celle observée,
+les enquêteurs travaillent dans les aires où ils ont été vus et la collecte avance au rythme réel : la
+démonstration devient une **projection de l'enquête complète**. Pour les aires pas encore visitées, l'enquêteur
+est provisoire (`AFFECTATION_PROVISOIRE` dans `kobo.py`).
+
+Mettre à jour le calage après un nouvel export Kobo (Excel, libellés ou valeurs) :
+
+```bash
+python calibrer_demo.py "export_kobo.xlsx"
+```
+
+puis envoyer le nouveau `calibrage_demo.json` sur GitHub. Ce fichier ne contient que des effectifs par réponse
+(aucune fiche, aucun code ménage, aucune coordonnée GPS, aucun texte libre). **Ne jamais déposer l'export Kobo
+lui-même dans le dépôt**, qui est public.
 
 ## 7. Partager le tableau de bord
 

@@ -592,7 +592,7 @@ with onglets[5]:
                             couleur=p["series"][6]), width="stretch")
 
 # 7 — tableaux du mémoire -------------------------------------------------------
-def afficher_tableau(titre, t, note=""):
+def afficher_tableau(titre, t, note="", exporter=True):
     st.markdown(f"**{titre}**")
     vis = [c for c in t.columns if not c.startswith("_")]
     t_aff = t.copy()
@@ -606,20 +606,24 @@ def afficher_tableau(titre, t, note=""):
     st.dataframe(sty, column_order=vis, hide_index=True, width="stretch",
                  height=min(38 * (len(t) + 1) + 4, 620))
     st.caption((note + " " if note else "") + "Source : enquête ménage, Zone de Santé de Limete, 2026.")
-    EXPORT.append((titre, t, note))
+    if exporter:
+        EXPORT.append((titre, t, note))
 
 
 EXPORT = []
 with onglets[6]:
     st.markdown("Les tableaux du chapitre IV du mémoire, recalculés en direct sur les fiches sélectionnées "
-                "(les filtres en haut de page s'appliquent). Le bouton en bas de page télécharge tous les tableaux "
-                "dans un classeur Excel, un tableau par feuille, prêts à être copiés dans le mémoire.")
+                "(les filtres en haut de page s'appliquent). **Corps du mémoire** : 9 tableaux de synthèse "
+                "(Tableaux 3 à 11). Les autres parties détaillent chaque domaine (Tableaux A1 à A26, à placer en annexe). "
+                "Le bouton en bas de page télécharge le classeur Excel : une feuille par tableau du corps, "
+                "puis une feuille « Annexes ».")
     V = tableaux.variables(df, dico)
     cat = tableaux.catalogue(V)
-    sections = ["Participation et prévalence", "Caractéristiques", "Facteurs associés", "Modèle multivarié",
-                "Prévention et connaissances", "Prise en charge"]
+    sections = ["Corps du mémoire", "Participation et prévalence", "Caractéristiques", "Facteurs associés",
+                "Modèle multivarié", "Prévention et connaissances", "Prise en charge"]
     choix_sec = st.segmented_control("Partie du chapitre Résultats", sections, default=sections[0],
                                      label_visibility="collapsed") or sections[0]
+    zone_corps = st.container()  # rempli en fin d'onglet, une fois tous les tableaux calculés
 
     # --- tableaux 5 à 7 (toujours calculés pour l'export)
     part_ = kobo.participation(brut)
@@ -654,17 +658,18 @@ with onglets[6]:
         return choix_sec == sec
 
     if rendu("Participation et prévalence"):
-        afficher_tableau("Tableau 5 : Participation à l'enquête", t5, n5)
-        afficher_tableau("Tableau 6 : Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois", t6,
+        afficher_tableau(tableaux.titre_annexe(5, "Participation à l'enquête"), t5, n5)
+        afficher_tableau(tableaux.titre_annexe(6, "Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois"), t6,
                          "IC à 95 % : méthode de Wilson.")
-        afficher_tableau("Tableau 7 : Prévalence de la diarrhée selon l'aire de santé", t7)
+        afficher_tableau(tableaux.titre_annexe(7, "Prévalence de la diarrhée selon l'aire de santé"), t7)
     else:
-        EXPORT += [("Tableau 5 : Participation à l'enquête", t5, n5),
-                   ("Tableau 6 : Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois", t6, ""),
-                   ("Tableau 7 : Prévalence de la diarrhée selon l'aire de santé", t7, "")]
+        EXPORT += [(tableaux.titre_annexe(5, "Participation à l'enquête"), t5, n5),
+                   (tableaux.titre_annexe(6, "Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois"), t6,
+                    "IC à 95 % : méthode de Wilson."),
+                   (tableaux.titre_annexe(7, "Prévalence de la diarrhée selon l'aire de santé"), t7, "")]
 
     for spec in cat:
-        titre = f"Tableau {spec['num']} : {spec['titre']}"
+        titre = tableaux.titre_annexe(spec["num"], spec["titre"])
         if spec["type"] == "desc":
             t = tableaux.tableau_descriptif(spec["vars"]); note = spec.get("note", "")
         else:
@@ -726,7 +731,8 @@ with onglets[6]:
                 + f"Hosmer-Lemeshow : χ² = {viz.fr(inf['hl'][0], 2)} ; ddl = {inf['hl'][1]} ; p = {tableaux.fmt_p(inf['hl'][2])}."
                 + (f" Pseudo-R² de McFadden = {viz.fr(inf['pseudo_r2'], 3)}." if inf.get("pseudo_r2") is not None else ""))
     n22 = note22(info)
-    titre22 = "Tableau 22 : Facteurs indépendamment associés à la diarrhée : régression logistique multivariée"
+    titre22 = (f"Tableau {tableaux.PREMIER_TABLEAU_CORPS + 5} : Facteurs indépendamment associés à la diarrhée : "
+               "régression logistique multivariée")
     if rendu("Modèle multivarié"):
         if "epv" in info:
             modele_multivarie.afficher_garde_fou(info["epv"])
@@ -749,18 +755,64 @@ with onglets[6]:
                 st.info(info["firth"])
             if "avertissement" in info:
                 st.info(info["avertissement"])
-            afficher_tableau(titre22, t22, n22)
+            afficher_tableau(titre22, t22, n22, exporter=False)
             st.plotly_chart(viz.points_ratios(t22["Variables (exposé vs non exposé)"].tolist(), t22["_ora"].tolist(),
                                               t22["_lo"].tolist(), t22["_hi"].tolist(), "Odds ratios ajustés (IC 95 %)", p,
                                               xtitre="Odds ratio ajusté (échelle log.)", nom="ORa"), width="stretch")
             st.caption("Modèle exploratoire : le modèle final du mémoire se construit pas à pas (confusion, interactions, "
                        "colinéarité) et, si le plan de sondage le justifie, en tenant compte de l'effet grappe.")
-    elif "erreur" not in info:
-        EXPORT.append((titre22, t22, n22))
+
+    # --- corps du mémoire : 9 tableaux de synthèse (Tableaux 3 à 11)
+    CORPS = []
+    for spec in tableaux.plan_corps(V):
+        titre = f"Tableau {spec['num']} : {spec['titre']}"
+        note = " ".join(x for x in (spec.get("note", ""), tableaux.note_annexes(spec)) if x)
+        if spec["type"] == "participation":
+            n_el, n_ref = part_.get("enquetes", 0), part_.get("refus", 0)
+            t = pd.DataFrame([
+                {"Indicateur": "Participation", "Effectif (n)": "", "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "h"},
+                {"Indicateur": "Fiches envoyées (ménages visités)", "Effectif (n)": part_.get("soumises", 0),
+                 "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "m"},
+                {"Indicateur": "Ménages non éligibles", "Effectif (n)": sum(part_.get("detail_non_elig", {}).values()),
+                 "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "m"},
+                {"Indicateur": "Refus de participation", "Effectif (n)": n_ref, "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "m"},
+                {"Indicateur": "Ménages enquêtés", "Effectif (n)": n_el,
+                 "Pourcentage (%)": viz.fr(100 * n_el / max(1, n_el + n_ref)), "IC à 95 %": "", "_niv": "m"},
+                {"Indicateur": "Diarrhée au cours des 14 derniers jours", "Effectif (n)": "", "Pourcentage (%)": "",
+                 "IC à 95 %": "", "_niv": "h"},
+                {"Indicateur": "Oui", "Effectif (n)": k6, "Pourcentage (%)": viz.fr(100 * v6),
+                 "IC à 95 %": f"{viz.fr(100 * b6)} – {viz.fr(100 * h6)}", "_niv": "m"},
+                {"Indicateur": "Non", "Effectif (n)": len(df) - k6, "Pourcentage (%)": viz.fr(100 - 100 * v6),
+                 "IC à 95 %": "", "_niv": "m"},
+            ])
+            note = ("Pourcentage de participation : ménages enquêtés parmi les ménages éligibles. IC à 95 % : méthode "
+                    "de Wilson. " + note)
+        elif spec["type"] == "desc":
+            t = tableaux.tableau_descriptif(spec["vars"])
+        elif spec["type"] == "biv_sel":
+            t = tableaux.bivarie_selection(df, spec["vars"])
+            note = (tableaux.NOTE_BIV + " " + note).strip()
+        else:
+            if "erreur" in info:
+                t = pd.DataFrame([{"Variables (exposé vs non exposé)": "Modèle non estimé pour le moment",
+                                   "ORa": "", "IC à 95 %": "", "p": ""}])
+                note = info["erreur"].replace("**", "").replace("\n\n", " ").replace("\n", " ")
+            else:
+                t, note = t22, n22
+            titre = titre22
+        CORPS.append((titre, t, note))
+
+    if rendu("Corps du mémoire"):
+        with zone_corps:
+            st.info("Tableaux de synthèse à placer dans le chapitre IV. Figures recommandées en complément : carte "
+                    "des prévalences par aire de santé et graphiques des odds ratios bruts et ajustés.")
+            for titre, t, note in CORPS:
+                afficher_tableau(titre, t, note, exporter=False)
 
     st.markdown("---")
-    EXPORT.sort(key=lambda x: int(x[0].split()[1]))
-    st.download_button("Télécharger tous les tableaux du mémoire (Excel)", tableaux.exporter_excel(EXPORT),
+    EXPORT.sort(key=lambda x: int(x[0].split()[1].lstrip("A")))
+    st.download_button("Télécharger les tableaux du mémoire (Excel : corps + annexes)",
+                       tableaux.exporter_excel_memoire(CORPS, EXPORT),
                        file_name=f"tableaux_resultats_diarrhee_limete_{dt.date.today():%Y%m%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 

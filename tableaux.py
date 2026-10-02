@@ -504,3 +504,147 @@ def exporter_excel(tableaux: List[Tuple[str, pd.DataFrame, str]]) -> bytes:
             for lettre in "BCDEFG":
                 ws.column_dimensions[lettre].width = 20
     return buf.getvalue()
+
+
+# ================================================== plan du mémoire : corps + annexes
+# Les tableaux détaillés (anciens numéros 5 à 31, sauf le modèle multivarié) passent en annexe (A1 à A26) ;
+# le corps du chapitre IV regroupe 9 tableaux, numérotés à la suite des Tableaux 1 et 2 du chapitre III.
+ANCIENS_NUMEROS = [n for n in range(5, 32) if n != 22]
+PREMIER_TABLEAU_CORPS = 3
+
+
+def numero_annexe(ancien: int) -> str:
+    return f"A{ANCIENS_NUMEROS.index(ancien) + 1}"
+
+
+def titre_annexe(ancien: int, titre: str) -> str:
+    return f"Tableau {numero_annexe(ancien)} : {titre}"
+
+
+def bivarie_selection(df: pd.DataFrame, vars_: List[Var], seuil: float = 0.20, issue: str = "j1") -> pd.DataFrame:
+    """Tableau bivarié limité aux variables dont p < seuil (blocs complets : en-tête + modalités)."""
+    vus, uniques = set(), []
+    for v in vars_:
+        if v.titre not in vus:
+            vus.add(v.titre)
+            uniques.append(v)
+    t, pvals = tableau_bivarie(df, uniques, issue)
+    garder = {titre for titre, p in pvals if p == p and p < seuil}
+    lignes, bloc_ok = [], False
+    for _, r in t.iterrows():
+        if r["_niv"] == "h":
+            bloc_ok = r["Variables / modalités"] in garder
+        if bloc_ok:
+            lignes.append(r)
+    if not lignes:
+        return pd.DataFrame([{"Variables / modalités": f"Aucune variable avec p < {viz.fr(seuil, 2)} pour le moment",
+                              "Diarrhée : Oui n (%)": "", "Diarrhée : Non n (%)": "", "ORb [IC 95 %]": "", "p": "",
+                              "_niv": "m"}])
+    return pd.DataFrame(lignes).reset_index(drop=True)
+
+
+def plan_corps(V: dict) -> List[dict]:
+    """Les 9 tableaux du corps du chapitre IV (le n° 3 et le n° 8 sont construits dans app.py)."""
+    g = lambda *k: [V[x] for x in k if x in V]
+    n = PREMIER_TABLEAU_CORPS
+    return [
+        {"num": n, "titre": "Participation à l’enquête et prévalence de la diarrhée au cours des 14 jours précédant l’enquête",
+         "type": "participation", "annexes": [5, 6, 7, 8]},
+        {"num": n + 1, "titre": "Caractéristiques des enfants enquêtés et de leurs mères ou responsables", "type": "desc",
+         "vars": g("age", "sexe", "rota", "lien", "etudes", "activite"), "annexes": [9, 10]},
+        {"num": n + 2, "titre": "Caractéristiques socio-économiques, habitat et environnement des ménages", "type": "desc",
+         "vars": g("taille", "quintile", "promiscuite", "sol", "inondation", "stagnantes", "depotoir"), "annexes": [11, 12]},
+        {"num": n + 3, "titre": "Alimentation et état nutritionnel des enfants", "type": "desc",
+         "vars": g("allaite", "exclusif", "intro", "whz", "haz", "waz", "pb", "oedemes"), "annexes": [13, 14],
+         "note": "z-scores selon les normes OMS 2006."},
+        {"num": n + 4, "titre": "Facteurs associés à la diarrhée en analyse bivariée (variables avec p < 0,20)", "type": "biv_sel",
+         "vars": g("age", "sexe", "rang", "rota", "etudes", "age_rep", "taille", "quintile", "promiscuite", "sol2",
+                   "allaite", "exclusif", "intro", "hors_menage", "conservation2",
+                   "b_emaciation", "b_retard_croissance", "b_insuffisance_ponderale", "b_malnutrition_aigue_pb",
+                   "eau_am", "jmp_eau", "interruptions", "traitement", "couvert", "prelevement2",
+                   "latrine2", "partage", "selles2", "feces_obs", "ruissellement", "jmp_hyg", "lav_toilettes", "lav_nourrir",
+                   "dechets2", "dechets_fermes", "inondation", "stagnantes", "caniveau", "depotoir2"),
+         "annexes": list(range(15, 22))},
+        {"num": n + 5, "titre": "Facteurs indépendamment associés à la diarrhée : régression logistique multivariée",
+         "type": "multivarie", "annexes": []},
+        {"num": n + 6, "titre": "Pratiques de prévention : eau, assainissement et hygiène des mains (niveaux de service JMP)",
+         "type": "desc", "vars": g("jmp_eau", "traitement", "couvert", "jmp_ass", "selles", "jmp_hyg", "savon"),
+         "annexes": [23, 24, 25]},
+        {"num": n + 7, "titre": "Connaissances des répondants sur la prévention et la prise en charge de la diarrhée",
+         "type": "desc", "vars": g("l1", "l3", "l4", "l5", "l6", "l7", "l8", "signes", "niveau_conn"),
+         "annexes": [26, 27, 28, 29]},
+        {"num": n + 8, "titre": "Prise en charge à domicile et recours aux soins des enfants ayant eu la diarrhée",
+         "type": "desc", "vars": g("k1", "k3", "k4", "k5", "sro_zinc", "pec_adequate", "k7", "k8", "k9"),
+         "annexes": [30, 31]},
+    ]
+
+
+def note_annexes(spec: dict) -> str:
+    if not spec.get("annexes"):
+        return ""
+    nums = [numero_annexe(a) for a in spec["annexes"]]
+    if len(nums) == 1:
+        liste = "tableau " + nums[0]
+    elif len(nums) == 2:
+        liste = f"tableaux {nums[0]} et {nums[1]}"
+    else:
+        liste = f"tableaux {nums[0]} à {nums[-1]}"
+    return f"Détail : {liste} en annexe."
+
+
+def exporter_excel_memoire(corps: List[Tuple[str, pd.DataFrame, str]],
+                           annexes: List[Tuple[str, pd.DataFrame, str]]) -> bytes:
+    """Classeur prêt pour le mémoire : une feuille par tableau du corps (T3 à T11),
+    puis une feuille « Annexes » où les tableaux détaillés sont empilés (A1 à A26)."""
+    from openpyxl.styles import Alignment, Font, PatternFill
+    source = "Source : enquête ménage, Zone de Santé de Limete, 2026."
+    entete = PatternFill("solid", fgColor="D9E2F3")
+    gris = PatternFill("solid", fgColor="F2F2F2")
+
+    def mettre_en_forme(ws, t, ligne_entete):
+        for c in ws[ligne_entete]:
+            if c.value is not None:
+                c.font = Font(bold=True); c.fill = entete
+                c.alignment = Alignment(wrap_text=True, vertical="center")
+        ncol = len([x for x in t.columns if not x.startswith("_")])
+        if "_niv" in t.columns:
+            for i, niv in enumerate(t["_niv"], start=ligne_entete + 1):
+                if niv == "h":
+                    for j in range(1, ncol + 1):
+                        ws.cell(i, j).font = Font(bold=True); ws.cell(i, j).fill = gris
+                else:
+                    ws.cell(i, 1).alignment = Alignment(indent=1)
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        sommaire = pd.DataFrame({"Partie": ["Corps du mémoire"] * len(corps) + ["Annexes"] * len(annexes),
+                                 "Tableau": [x[0] for x in corps] + [x[0] for x in annexes]})
+        sommaire.to_excel(w, sheet_name="Sommaire", index=False)
+        w.sheets["Sommaire"].column_dimensions["A"].width = 18
+        w.sheets["Sommaire"].column_dimensions["B"].width = 110
+        for titre, t, note in corps:
+            nom = titre.split(" :")[0].replace("Tableau ", "T")[:31]
+            vis = t[[c for c in t.columns if not c.startswith("_")]]
+            vis.to_excel(w, sheet_name=nom, index=False, startrow=2)
+            ws = w.sheets[nom]
+            ws["A1"] = titre; ws["A1"].font = Font(bold=True, size=12)
+            mettre_en_forme(ws, t, 3)
+            ws.cell(len(t) + 5, 1, (note + " " if note else "") + source).font = Font(italic=True, size=9)
+            ws.column_dimensions["A"].width = 58
+            for lettre in "BCDEFG":
+                ws.column_dimensions[lettre].width = 20
+        ligne = 0
+        for titre, t, note in annexes:
+            vis = t[[c for c in t.columns if not c.startswith("_")]]
+            vis.to_excel(w, sheet_name="Annexes", index=False, startrow=ligne + 1)
+            ws = w.sheets["Annexes"]
+            ws.cell(ligne + 1, 1, titre).font = Font(bold=True, size=12)
+            mettre_en_forme(ws, t, ligne + 2)
+            ws.cell(ligne + len(t) + 3, 1, (note + " " if note else "") + source).font = Font(italic=True, size=9)
+            ligne += len(t) + 6
+        if annexes:
+            ws = w.sheets["Annexes"]
+            ws.column_dimensions["A"].width = 58
+            for lettre in "BCDEFG":
+                ws.column_dimensions[lettre].width = 20
+    return buf.getvalue()

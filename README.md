@@ -17,7 +17,7 @@ Visualisation dynamique des données collectées avec **KoboCollect** (formulair
 | `carte_sanitaire/preparer_carte_sanitaire.R` | Crée `aires_limete.geojson` (limites des 11 aires de santé) à partir du shapefile DSNIS/GRID3 |
 | `carte_sanitaire/aires_limete.geojson` | Carte sanitaire de la ZS de Limete (à ajouter, voir section 6) |
 | `partage.py` | Partage : lien, lien vers la vue filtrée, QR code, WhatsApp, e-mail, SMS |
-| `calibrer_demo.py` / `calibrage_demo.json` | Calage du mode démonstration sur un export réel (agrégats seulement) |
+| `suivi.py` | Suivi par enquêteur : quotas des lots, rythme attendu (10 fiches/jour), cumul, fiches par jour, tableau de suivi |
 | `modele_multivarie.py` | Garde-fou EPV du modèle multivarié (cas disponibles / nécessaires, projection en fin de collecte) et régression logistique pénalisée de Firth |
 | `nutrition.py` | Calcul des z-scores (normes de croissance OMS 2006) et classes d'état nutritionnel |
 | `who_lms.csv` | Tables de référence LMS de l'OMS (poids-pour-âge, taille-pour-âge, poids-pour-taille) |
@@ -79,7 +79,8 @@ Pour restreindre l'accès : Streamlit Cloud permet de limiter l'application à d
 ## 5. Ce que montre le tableau de bord
 
 - **Cartes de synthèse** : fiches éligibles, prévalence de la diarrhée sur 14 jours avec IC 95 %, nombre de cas, SRO, SRO + zinc, recours aux soins.
-- **Suivi de la collecte** : fiches par jour, cumul, répartition et durée médiane d'entretien par enquêteur.
+- **Filtre « Enquêteur »** (rangée Filtres) : un ou plusieurs enquêteurs ; il s'applique à tout le tableau de bord et au lien de partage.
+- **Suivi de la collecte** : fiches par jour, cumul, évolution par enquêteur (cumul comparé au rythme attendu, point d'étape à 40, fiches par jour, tableau quota / avancement / écart / dernière fiche, export CSV), répartition et durée médiane d'entretien par enquêteur. Les quotas de chaque enquêteur se renseignent dans `suivi.py` (`QUOTAS`).
 - **Profil épidémiologique** : prévalence par aire de santé, par tranche d'âge et selon le sexe, avec intervalles de confiance de Wilson.
 - **Facteurs associés** : niveaux de service WASH selon l'échelle JMP, et ratios de prévalence bruts (graphique en forêt + tableau) pour les expositions clés — inondation, eaux stagnantes, eau non améliorée, latrine partagée, absence de savon, surpeuplement.
 - **Prise en charge** : cascade SRO / zinc / liquides / alimentation / recours aux soins, et premier lieu de recours.
@@ -129,31 +130,7 @@ Créer le fichier une seule fois, avec R :
    (Industrielle 1 → Industriel 1, Mfumu Mvula → Mfumu, Résidentielle → Résidentiel) et crée `aires_limete.geojson`.
 3. Copier ce fichier dans le dossier `carte_sanitaire/` du dépôt et l'envoyer sur GitHub : l'application se met à jour.
 
-Ou directement depuis QGIS : clic droit sur la couche des aires de la ZS de Limete → **Exporter → Sauvegarder les
-entités sous…**, format **GeoJSON**, SCR **EPSG:4326 – WGS 84**, nom `aires_limete.geojson`. Les noms officiels
-(champ `AS_`, `Aire_Sante`, `Nom`…) sont reconnus. Le fichier peut être déposé dans `carte_sanitaire/` ou
-directement à la racine du dépôt. En mode démonstration, les ménages fictifs sont alors placés à l'intérieur
-des limites réelles de leur aire.
-
 Sans ce fichier, le tableau de bord fonctionne comme avant (contrôle par une emprise rectangulaire et bulles par aire).
-
-### Mode démonstration calé sur le terrain
-
-Le mode démonstration simule les **427 ménages** prévus. Si `calibrage_demo.json` est présent, chaque question
-est tirée selon les réponses observées sur le terrain, la prévalence de la diarrhée est calée sur celle observée,
-les enquêteurs travaillent dans les aires où ils ont été vus et la collecte avance au rythme réel : la
-démonstration devient une **projection de l'enquête complète**. Pour les aires pas encore visitées, l'enquêteur
-est provisoire (`AFFECTATION_PROVISOIRE` dans `kobo.py`).
-
-Mettre à jour le calage après un nouvel export Kobo (Excel, libellés ou valeurs) :
-
-```bash
-python calibrer_demo.py "export_kobo.xlsx"
-```
-
-puis envoyer le nouveau `calibrage_demo.json` sur GitHub. Ce fichier ne contient que des effectifs par réponse
-(aucune fiche, aucun code ménage, aucune coordonnée GPS, aucun texte libre). **Ne jamais déposer l'export Kobo
-lui-même dans le dépôt**, qui est public.
 
 ## 7. Partager le tableau de bord
 

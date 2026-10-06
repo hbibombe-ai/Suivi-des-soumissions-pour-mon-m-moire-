@@ -5,7 +5,7 @@ L'adresse publique de l'application est lue dans les Secrets (`[app] url = "http
 """
 from __future__ import annotations
 
-VERSION_TDB = "8"  # doit correspondre à app.py
+VERSION_TDB = "9"  # doit correspondre à app.py
 import io
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
@@ -79,7 +79,7 @@ def panneau(filtres: dict, resume: str, titre_app: str) -> None:
             return
         avec_filtres = st.toggle("Partager la vue filtrée", value=bool(filtres),
                                  help="Le destinataire ouvrira le tableau de bord avec les mêmes filtres "
-                                      "(période, aires, sexe, tranches d'âge).")
+                                      "(période, aires, sexe, tranches d'âge, enquêteurs).")
         url = lien(base, filtres if avec_filtres else None)
         st.code(url, language=None, wrap_lines=True)
         st.caption("Bouton de copie en haut à droite du cadre.")

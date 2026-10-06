@@ -14,6 +14,7 @@ import streamlit as st
 import geo
 import kobo
 import partage
+import suivi
 import tableaux
 import theme
 import viz
@@ -22,13 +23,13 @@ st.set_page_config(page_title="Diarrhée < 5 ans — ZS Limete", page_icon="💧
                    layout="wide", initial_sidebar_state="expanded")
 
 # Contrôle de cohérence : tous les fichiers du dépôt doivent provenir de la même version
-VERSION_TDB = "8"
+VERSION_TDB = "9"
 try:
     import modele_multivarie
     import nutrition
     import tableaux as _t
     _perimes = [nom for nom, mod in (("kobo.py", kobo), ("tableaux.py", _t), ("nutrition.py", nutrition), ("viz.py", viz),
-                                      ("geo.py", geo), ("partage.py", partage),
+                                      ("geo.py", geo), ("partage.py", partage), ("suivi.py", suivi),
                                       ("modele_multivarie.py", modele_multivarie))
                 if getattr(mod, "VERSION_TDB", None) != VERSION_TDB]
 except ImportError as _e:
@@ -181,7 +182,7 @@ theme.entete(TITRE, SOUS_TITRE, chips)
 
 # ------------------------------------------------------------------------ filtres
 st.markdown('<div class="filtre-titre">Filtres</div>', unsafe_allow_html=True)
-f1, f2, f3, f4 = st.columns([1.6, 2.2, 1.1, 1.6])
+f1, f2, f3, f4, f5 = st.columns([1.6, 2.0, 1.0, 1.5, 1.6])
 jours = sorted([j for j in df["jour"].dropna().unique()])
 FILTRES = {"demo": "1"} if demo else {}
 def _date_url(cle, defaut):
@@ -220,6 +221,16 @@ sel_tr = f4.multiselect("Tranche d'âge", tranches, default=[x for x in partage.
 if sel_tr:
     df = df[df["tranche_age"].isin(sel_tr)]
     FILTRES["tranches"] = sel_tr
+
+# Enquêteur : filtre appliqué en dernier ; l'équipe (df_equipe) sert de référence pour le suivi
+df_equipe = df
+enqueteurs = sorted(df["enqueteur"].dropna().unique()) if "enqueteur" in df else []
+sel_enq = f5.multiselect("Enquêteur", enqueteurs,
+                         default=[x for x in partage.lire_liste("enqueteurs") if x in enqueteurs],
+                         placeholder=f"Tous les enquêteurs ({len(enqueteurs)})")
+if sel_enq:
+    df = df[df["enqueteur"].isin(sel_enq)]
+    FILTRES["enqueteurs"] = sel_enq
 partage.ecrire_filtres(FILTRES)  # l'adresse du navigateur reflète toujours la vue affichée
 
 st.markdown(f'<div class="pdp">{len(df)} fiche(s) sélectionnée(s) · actualisation automatique '
@@ -289,6 +300,53 @@ with onglets[0]:
     parjour["cumul"] = parjour["n"].cumsum()
     g2.plotly_chart(viz.courbe_cumul(parjour["jour"], parjour["cumul"], "Cumul des fiches collectées", p),
                     width="stretch")
+
+    # --- évolution par enquêteur (suit le filtre « Enquêteur ») ---
+    if "enqueteur" in df and df["jour"].notna().any():
+        jours_eq = df_equipe["jour"].dropna()
+        j1 = suivi.debut(jours_eq)
+        fin = jours_eq.max()                       # dernier jour de collecte de l'équipe
+        n_equipe = df_equipe["enqueteur"].nunique()
+        jr = suivi.rang_jour(fin, j1)
+        dfe = df.dropna(subset=["jour", "enqueteur"])
+        s_enq = suivi.serie(dfe, j1, fin)
+        noms_sel = sorted(dfe["enqueteur"].unique())
+        un_seul = len(noms_sel) == 1
+        objectif = (sum(suivi.quota(x, n_equipe) for x in noms_sel) if sel_enq else suivi.OBJECTIF_TOTAL)
+        attendu = min(objectif, suivi.RYTHME_JOUR * jr * len(noms_sel))
+        theme.section("Évolution par enquêteur" + (f" — {noms_sel[0]}" if un_seul else ""),
+                      f"Rythme visé : {suivi.RYTHME_JOUR} fiches par jour et par enquêteur (dimanche non travaillé). "
+                      f"Référence : J{jr}, le {fin:%d/%m/%Y}, dernier jour de collecte de l'équipe. "
+                      "Choisir un ou plusieurs enquêteurs dans le filtre « Enquêteur » en haut de page.")
+        k = st.columns(4, gap="small")
+        ecart = len(dfe) - attendu
+        carte(k[0], "Fiches envoyées", f"{len(dfe)}", f"attendu à J{jr} : {attendu} ({ecart:+d})",
+              p["good"] if ecart >= 0 else p["bad"])
+        carte(k[1], "Objectif atteint", f"{viz.fr(100 * len(dfe) / objectif, 0)} %", f"{len(dfe)} sur {objectif} ménages")
+        carte(k[2], f"Fiches du {fin:%d/%m}", f"{int((dfe['jour'] == fin).sum())}",
+              f"visé : {suivi.RYTHME_JOUR * len(noms_sel)}", p["series"][0])
+        par_jour_actif = (dfe.groupby("enqueteur").size() / dfe.groupby("enqueteur")["jour"].nunique()).mean()
+        carte(k[3], "Fiches par jour travaillé", viz.fr(par_jour_actif), "moyenne par enquêteur, jours avec ≥ 1 fiche",
+              p["series"][0])
+        st.write("")
+        e1, e2 = st.columns(2)
+        quota_ref = suivi.quota(noms_sel[0], n_equipe) if un_seul else round(suivi.OBJECTIF_TOTAL / max(1, n_equipe))
+        e1.plotly_chart(suivi.courbes_cumul(s_enq, j1, quota_ref, p, "Cumul des fiches par enquêteur", enqueteurs), width="stretch")
+        e2.plotly_chart(suivi.barres_jour(s_enq, suivi.RYTHME_JOUR * len(noms_sel), p, "Fiches par jour et par enquêteur",
+                                         enqueteurs),
+                        width="stretch")
+        tab_suivi = suivi.tableau(s_enq, dfe, j1, fin, n_equipe)
+        st.dataframe(tab_suivi, hide_index=True, width="stretch", column_config={
+            "Avancement": st.column_config.ProgressColumn("Avancement", min_value=0, max_value=100, format="%d %%"),
+            "Écart": st.column_config.NumberColumn("Écart", format="%+d",
+                                                   help="Fiches envoyées moins fiches attendues à ce jour"),
+        })
+        st.caption("Quota : à renseigner pour chaque enquêteur dans `suivi.py` (QUOTAS) ; à défaut, "
+                   f"{suivi.OBJECTIF_TOTAL} ménages répartis à parts égales. Date : date de collecte (A2), "
+                   "à défaut date d'envoi au serveur.")
+        st.download_button("Télécharger le tableau de suivi (CSV)", tab_suivi.to_csv(index=False, sep=";").encode("utf-8-sig"),
+                           file_name=f"suivi_enqueteurs_{fin:%Y%m%d}.csv", mime="text/csv")
+
     g3, g4 = st.columns(2)
     if "enqueteur" in df:
         pe = df.groupby("enqueteur").agg(fiches=("enqueteur", "size"),
@@ -592,7 +650,7 @@ with onglets[5]:
                             couleur=p["series"][6]), width="stretch")
 
 # 7 — tableaux du mémoire -------------------------------------------------------
-def afficher_tableau(titre, t, note="", exporter=True):
+def afficher_tableau(titre, t, note=""):
     st.markdown(f"**{titre}**")
     vis = [c for c in t.columns if not c.startswith("_")]
     t_aff = t.copy()
@@ -606,24 +664,20 @@ def afficher_tableau(titre, t, note="", exporter=True):
     st.dataframe(sty, column_order=vis, hide_index=True, width="stretch",
                  height=min(38 * (len(t) + 1) + 4, 620))
     st.caption((note + " " if note else "") + "Source : enquête ménage, Zone de Santé de Limete, 2026.")
-    if exporter:
-        EXPORT.append((titre, t, note))
+    EXPORT.append((titre, t, note))
 
 
 EXPORT = []
 with onglets[6]:
     st.markdown("Les tableaux du chapitre IV du mémoire, recalculés en direct sur les fiches sélectionnées "
-                "(les filtres en haut de page s'appliquent). **Corps du mémoire** : 9 tableaux de synthèse "
-                "(Tableaux 3 à 11). Les autres parties détaillent chaque domaine (Tableaux A1 à A26, à placer en annexe). "
-                "Le bouton en bas de page télécharge le classeur Excel : une feuille par tableau du corps, "
-                "puis une feuille « Annexes ».")
+                "(les filtres en haut de page s'appliquent). Le bouton en bas de page télécharge tous les tableaux "
+                "dans un classeur Excel, un tableau par feuille, prêts à être copiés dans le mémoire.")
     V = tableaux.variables(df, dico)
     cat = tableaux.catalogue(V)
-    sections = ["Corps du mémoire", "Participation et prévalence", "Caractéristiques", "Facteurs associés",
-                "Modèle multivarié", "Prévention et connaissances", "Prise en charge"]
+    sections = ["Participation et prévalence", "Caractéristiques", "Facteurs associés", "Modèle multivarié",
+                "Prévention et connaissances", "Prise en charge"]
     choix_sec = st.segmented_control("Partie du chapitre Résultats", sections, default=sections[0],
                                      label_visibility="collapsed") or sections[0]
-    zone_corps = st.container()  # rempli en fin d'onglet, une fois tous les tableaux calculés
 
     # --- tableaux 5 à 7 (toujours calculés pour l'export)
     part_ = kobo.participation(brut)
@@ -658,18 +712,17 @@ with onglets[6]:
         return choix_sec == sec
 
     if rendu("Participation et prévalence"):
-        afficher_tableau(tableaux.titre_annexe(5, "Participation à l'enquête"), t5, n5)
-        afficher_tableau(tableaux.titre_annexe(6, "Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois"), t6,
+        afficher_tableau("Tableau 5 : Participation à l'enquête", t5, n5)
+        afficher_tableau("Tableau 6 : Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois", t6,
                          "IC à 95 % : méthode de Wilson.")
-        afficher_tableau(tableaux.titre_annexe(7, "Prévalence de la diarrhée selon l'aire de santé"), t7)
+        afficher_tableau("Tableau 7 : Prévalence de la diarrhée selon l'aire de santé", t7)
     else:
-        EXPORT += [(tableaux.titre_annexe(5, "Participation à l'enquête"), t5, n5),
-                   (tableaux.titre_annexe(6, "Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois"), t6,
-                    "IC à 95 % : méthode de Wilson."),
-                   (tableaux.titre_annexe(7, "Prévalence de la diarrhée selon l'aire de santé"), t7, "")]
+        EXPORT += [("Tableau 5 : Participation à l'enquête", t5, n5),
+                   ("Tableau 6 : Prévalence de la diarrhée au cours des 14 jours précédant l'enquête chez les enfants de 0 à 59 mois", t6, ""),
+                   ("Tableau 7 : Prévalence de la diarrhée selon l'aire de santé", t7, "")]
 
     for spec in cat:
-        titre = tableaux.titre_annexe(spec["num"], spec["titre"])
+        titre = f"Tableau {spec['num']} : {spec['titre']}"
         if spec["type"] == "desc":
             t = tableaux.tableau_descriptif(spec["vars"]); note = spec.get("note", "")
         else:
@@ -731,8 +784,7 @@ with onglets[6]:
                 + f"Hosmer-Lemeshow : χ² = {viz.fr(inf['hl'][0], 2)} ; ddl = {inf['hl'][1]} ; p = {tableaux.fmt_p(inf['hl'][2])}."
                 + (f" Pseudo-R² de McFadden = {viz.fr(inf['pseudo_r2'], 3)}." if inf.get("pseudo_r2") is not None else ""))
     n22 = note22(info)
-    titre22 = (f"Tableau {tableaux.PREMIER_TABLEAU_CORPS + 5} : Facteurs indépendamment associés à la diarrhée : "
-               "régression logistique multivariée")
+    titre22 = "Tableau 22 : Facteurs indépendamment associés à la diarrhée : régression logistique multivariée"
     if rendu("Modèle multivarié"):
         if "epv" in info:
             modele_multivarie.afficher_garde_fou(info["epv"])
@@ -755,64 +807,18 @@ with onglets[6]:
                 st.info(info["firth"])
             if "avertissement" in info:
                 st.info(info["avertissement"])
-            afficher_tableau(titre22, t22, n22, exporter=False)
+            afficher_tableau(titre22, t22, n22)
             st.plotly_chart(viz.points_ratios(t22["Variables (exposé vs non exposé)"].tolist(), t22["_ora"].tolist(),
                                               t22["_lo"].tolist(), t22["_hi"].tolist(), "Odds ratios ajustés (IC 95 %)", p,
                                               xtitre="Odds ratio ajusté (échelle log.)", nom="ORa"), width="stretch")
             st.caption("Modèle exploratoire : le modèle final du mémoire se construit pas à pas (confusion, interactions, "
                        "colinéarité) et, si le plan de sondage le justifie, en tenant compte de l'effet grappe.")
-
-    # --- corps du mémoire : 9 tableaux de synthèse (Tableaux 3 à 11)
-    CORPS = []
-    for spec in tableaux.plan_corps(V):
-        titre = f"Tableau {spec['num']} : {spec['titre']}"
-        note = " ".join(x for x in (spec.get("note", ""), tableaux.note_annexes(spec)) if x)
-        if spec["type"] == "participation":
-            n_el, n_ref = part_.get("enquetes", 0), part_.get("refus", 0)
-            t = pd.DataFrame([
-                {"Indicateur": "Participation", "Effectif (n)": "", "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "h"},
-                {"Indicateur": "Fiches envoyées (ménages visités)", "Effectif (n)": part_.get("soumises", 0),
-                 "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "m"},
-                {"Indicateur": "Ménages non éligibles", "Effectif (n)": sum(part_.get("detail_non_elig", {}).values()),
-                 "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "m"},
-                {"Indicateur": "Refus de participation", "Effectif (n)": n_ref, "Pourcentage (%)": "", "IC à 95 %": "", "_niv": "m"},
-                {"Indicateur": "Ménages enquêtés", "Effectif (n)": n_el,
-                 "Pourcentage (%)": viz.fr(100 * n_el / max(1, n_el + n_ref)), "IC à 95 %": "", "_niv": "m"},
-                {"Indicateur": "Diarrhée au cours des 14 derniers jours", "Effectif (n)": "", "Pourcentage (%)": "",
-                 "IC à 95 %": "", "_niv": "h"},
-                {"Indicateur": "Oui", "Effectif (n)": k6, "Pourcentage (%)": viz.fr(100 * v6),
-                 "IC à 95 %": f"{viz.fr(100 * b6)} – {viz.fr(100 * h6)}", "_niv": "m"},
-                {"Indicateur": "Non", "Effectif (n)": len(df) - k6, "Pourcentage (%)": viz.fr(100 - 100 * v6),
-                 "IC à 95 %": "", "_niv": "m"},
-            ])
-            note = ("Pourcentage de participation : ménages enquêtés parmi les ménages éligibles. IC à 95 % : méthode "
-                    "de Wilson. " + note)
-        elif spec["type"] == "desc":
-            t = tableaux.tableau_descriptif(spec["vars"])
-        elif spec["type"] == "biv_sel":
-            t = tableaux.bivarie_selection(df, spec["vars"])
-            note = (tableaux.NOTE_BIV + " " + note).strip()
-        else:
-            if "erreur" in info:
-                t = pd.DataFrame([{"Variables (exposé vs non exposé)": "Modèle non estimé pour le moment",
-                                   "ORa": "", "IC à 95 %": "", "p": ""}])
-                note = info["erreur"].replace("**", "").replace("\n\n", " ").replace("\n", " ")
-            else:
-                t, note = t22, n22
-            titre = titre22
-        CORPS.append((titre, t, note))
-
-    if rendu("Corps du mémoire"):
-        with zone_corps:
-            st.info("Tableaux de synthèse à placer dans le chapitre IV. Figures recommandées en complément : carte "
-                    "des prévalences par aire de santé et graphiques des odds ratios bruts et ajustés.")
-            for titre, t, note in CORPS:
-                afficher_tableau(titre, t, note, exporter=False)
+    elif "erreur" not in info:
+        EXPORT.append((titre22, t22, n22))
 
     st.markdown("---")
-    EXPORT.sort(key=lambda x: int(x[0].split()[1].lstrip("A")))
-    st.download_button("Télécharger les tableaux du mémoire (Excel : corps + annexes)",
-                       tableaux.exporter_excel_memoire(CORPS, EXPORT),
+    EXPORT.sort(key=lambda x: int(x[0].split()[1]))
+    st.download_button("Télécharger tous les tableaux du mémoire (Excel)", tableaux.exporter_excel(EXPORT),
                        file_name=f"tableaux_resultats_diarrhee_limete_{dt.date.today():%Y%m%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
 

@@ -12,7 +12,7 @@ Sans ce fichier, le tableau de bord fonctionne comme avant (emprise rectangulair
 """
 from __future__ import annotations
 
-VERSION_TDB = "8"  # doit correspondre à app.py
+VERSION_TDB = "9"  # doit correspondre à app.py
 import functools
 import hashlib
 import json
@@ -30,13 +30,7 @@ CENTRE = dict(lat=-4.372, lon=15.335)
 PRECISION_MAX_M = 50  # au-delà, le point est jugé imprécis
 
 # Carte sanitaire
-_DOSSIER = os.path.dirname(os.path.abspath(__file__))
-# Le fichier peut être placé dans carte_sanitaire/ ou directement à la racine du dépôt
-FICHIERS_AIRES = [os.path.join(_DOSSIER, "carte_sanitaire", "aires_limete.geojson"),
-                  os.path.join(_DOSSIER, "aires_limete.geojson")]
-FICHIER_AIRES = next((f for f in FICHIERS_AIRES if os.path.exists(f)), FICHIERS_AIRES[0])
-# Champs acceptés pour le nom de l'aire (script R, export QGIS du shapefile DSNIS/GRID3…)
-CHAMPS_NOM_AIRE = ["aire", "nom_officiel", "AS_", "AS", "Aire_Sante", "AIRE_SANTE", "aire_sante", "Nom", "NOM", "nom", "name"]
+FICHIER_AIRES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "carte_sanitaire", "aires_limete.geojson")
 TOLERANCE_M = 100  # un point à moins de 100 m de la limite de la ZS n'est pas compté « hors zone » (imprécision GPS)
 AIRE_HORS = "Hors ZS"
 
@@ -146,11 +140,9 @@ def carte_sanitaire() -> dict | None:
             polys = _anneaux(feat["geometry"])
             if not polys:
                 continue
-            props = feat.get("properties") or {}
-            nom = next((props[c] for c in CHAMPS_NOM_AIRE if props.get(c)), "?")
-            feat["properties"] = props
-            props["cle"] = cle_aire(nom)
-            props["aire"] = nom
+            nom = feat["properties"].get("aire") or feat["properties"].get("nom_officiel") or "?"
+            feat["properties"]["cle"] = cle_aire(nom)
+            feat["properties"]["aire"] = nom
             lon_e, lat_e = _point_etiquette(polys)
             tous = np.vstack([r for p_ in polys for r in p_])
             aires.append(dict(cle=cle_aire(nom), aire=nom, polys=polys, lon_etiq=lon_e, lat_etiq=lat_e,

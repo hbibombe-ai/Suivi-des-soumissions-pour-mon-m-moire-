@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-VERSION_TDB = "8"  # doit correspondre à app.py
+VERSION_TDB = "9"  # doit correspondre à app.py
 import datetime as dt
 import math
 from dataclasses import dataclass

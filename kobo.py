@@ -6,7 +6,7 @@ libellés à partir du XLSForm déposé dans le dépôt (version V7 du formulair
 """
 from __future__ import annotations
 
-VERSION_TDB = "8"  # doit correspondre à app.py
+VERSION_TDB = "9"  # doit correspondre à app.py
 import datetime as dt
 import random
 from typing import Dict, List
@@ -271,118 +271,22 @@ def diagnostic(brut: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------- données de test
-# Enquêteurs actuellement sur le terrain (mode démonstration)
-ENQUETEURS_DEMO = ["FLODEN", "ELVIS", "HERMELINE", "BEATRICE", "CHRISTEVIE"]
-# Aires pas encore visitées dans l'export de calibrage : enquêteur PROVISOIRE (voisinage sur la carte),
-# remplacé automatiquement par l'affectation réelle dès qu'un nouvel export la montre.
-AFFECTATION_PROVISOIRE = {"industriel_1": "ELVIS", "industriel_3": "CHRISTEVIE", "mateba": "CHRISTEVIE",
-                          "agricole": "BEATRICE", "mfumu": "BEATRICE", "mombele": "HERMELINE",
-                          "masiala": "FLODEN", "residentiel": "FLODEN", "industriel_2": "ELVIS",
-                          "mayulu": "BEATRICE", "mososo": "CHRISTEVIE"}
-FICHIER_CALIBRAGE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "calibrage_demo.json")
-
-
-def calibrage_demo() -> dict | None:
-    """Agrégats d'un export réel (voir calibrer_demo.py) ; None si le fichier est absent."""
-    try:
-        import json
-        with open(FICHIER_CALIBRAGE, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
-
-
-def donnees_demo(n: int = 427, graine: int = 11) -> pd.DataFrame:
-    """Jeu de données fictif respectant la structure du formulaire V7 (mode démonstration) :
-    427 ménages enquêtés (taille d'échantillon prévue) dans les 11 aires de santé de la ZS de Limete,
-    collectés par les 5 enquêteurs de terrain.
-
-    Si calibrage_demo.json est présent, chaque question est tirée selon la distribution observée
-    sur le terrain, la prévalence de la diarrhée est calée sur celle observée et la collecte suit le
-    rythme réel : la démonstration devient une projection de l'enquête complète."""
-    cal = calibrage_demo()
-    if cal and cal.get("prevalence", {}).get("n"):
-        p = cal["prevalence"]
-        cible, facteur = p["cas"] / p["n"], 1.0
-        for _ in range(3):  # ajuster le risque moyen sur la prévalence observée
-            df = _simuler(n, graine, cal, facteur)
-            obs = df.loc[df["eligible"] == 1, "j1"].mean()
-            if not obs or abs(obs - cible) < 0.005:
-                break
-            facteur *= cible / obs
-    else:
-        df = _simuler(n, graine, None, 1.0)
-    return df.drop(columns="_risque")
-
-
-def _simuler(n: int, graine: int, cal: dict | None, facteur: float) -> pd.DataFrame:
+def donnees_demo(n: int = 420, graine: int = 11) -> pd.DataFrame:
+    """Jeu de données fictif respectant la structure du formulaire V7 (mode démonstration)."""
     rng = random.Random(graine)
     ch = rng.choice
-
-    def tc(var, defaut):
-        """Question à choix : distribution observée (+0,5 par modalité pour garder les réponses rares)."""
-        if cal and var in cal.get("categoriel", {}):
-            cpt = cal["categoriel"][var]
-            codes = list(cpt)
-            v = rng.choices(codes, [cpt[c] + 0.5 for c in codes])[0]
-            try:
-                return int(v)
-            except ValueError:
-                return v
-        return defaut
-
-    def tn(var, defaut, ecart=0, bornes=None):
-        """Question numérique : valeur observée tirée au hasard, légèrement perturbée."""
-        if cal and var in cal.get("numerique", {}):
-            h = cal["numerique"][var]
-            x = float(rng.choices(list(h), list(h.values()))[0])
-            if ecart:
-                x += rng.randint(-ecart, ecart)
-            if bornes:
-                x = min(max(x, bornes[0]), bornes[1])
-            return int(x) if x.is_integer() else x
-        return defaut
-
-    # enquêteur selon l'aire : répartition observée, sinon affectation provisoire
-    obs = {}
-    for q, aires_q in ((cal or {}).get("enqueteurs_aires") or {}).items():
-        for a, k in aires_q.items():
-            obs.setdefault(a, {})[q] = k
-
-    def enqueteur(aire, aire_i):
-        if aire in obs:
-            return rng.choices(list(obs[aire]), list(obs[aire].values()))[0]
-        if cal:
-            return AFFECTATION_PROVISOIRE.get(aire, ENQUETEURS_DEMO[aire_i % 5])
-        return ENQUETEURS_DEMO[aire_i % len(ENQUETEURS_DEMO)]
-
-    coll = (cal or {}).get("collecte") or {}
-    if coll.get("debut"):
-        debut = dt.date.fromisoformat(coll["debut"])
-        rythme = max(float(coll.get("fiches_par_jour") or 20), 1.0)
-        def jour(i):  # projection : la collecte continue au rythme observé
-            return debut + dt.timedelta(days=int(i / rythme))
-    else:
-        debut = dt.date.today() - dt.timedelta(days=21)
-        def jour(i):
-            return debut + dt.timedelta(days=rng.randint(0, 21))
-
+    debut = dt.date.today() - dt.timedelta(days=21)
     lignes = []
     for i in range(n):
         aire_i = rng.randrange(11)
         aire = AIRES[aire_i]
-        inond = tc("d18", int(rng.random() < (0.55 if aire in ("industriel_1", "mombele", "mososo") else 0.22))) == 1
-        f1 = tc("f1", None)
-        if f1 is None:
-            eau_am = rng.random() < 0.78
-            f1 = ch([1, 2, 3, 7]) if eau_am else ch([4, 6, 9])
-        eau_am = f1 in (1, 2, 3, 5, 7, 8)
-        savon = tc("i3", int(rng.random() < 0.52)) == 1
-        g1 = tc("g1", ch([1, 2, 3]) if rng.random() < 0.8 else ch([4, 5]))
-        partage = tc("g2", int(rng.random() < 0.46)) == 1
-        age = tn("b3", ch([rng.randint(0, 5), rng.randint(6, 11), rng.randint(12, 23), rng.randint(24, 35),
-                           rng.randint(36, 47), rng.randint(48, 59)]), ecart=2, bornes=(0, 59))
-        sexe = tc("b1", ch([1, 2]))
+        inond = rng.random() < (0.55 if aire in ("industriel_1", "mombele", "mososo") else 0.22)
+        eau_am = rng.random() < 0.78
+        savon = rng.random() < 0.52
+        partage = rng.random() < 0.46
+        age = ch([rng.randint(0, 5), rng.randint(6, 11), rng.randint(12, 23), rng.randint(24, 35),
+                  rng.randint(36, 47), rng.randint(48, 59)])
+        sexe = ch([1, 2])
         # anthropométrie : tirages autour de la médiane OMS
         z_h, z_w = rng.gauss(-0.9, 1.2), rng.gauss(-0.4, 1.1)
         lms_h = nutrition._lms("lhfa_l" if age < 24 else "lhfa_h", sexe, age + 0.5)
@@ -393,61 +297,49 @@ def _simuler(n: int, graine: int, cal: dict | None, facteur: float) -> pd.DataFr
         maigre = (z_w < -2) or (pb is not None and pb < 125)
         risque = 0.10 + 0.10 * inond + 0.07 * (not eau_am) + 0.06 * (not savon) + 0.03 * partage + 0.08 * maigre \
             + (0.06 if 6 <= age <= 23 else 0)
-        risque = min(0.95, risque * facteur)
         diarrhee = rng.random() < risque
-        f8 = tc("f8", ch([1, 1, 2, 3, 4]))
-        i1, i2 = tc("i1", int(rng.random() < 0.72)), tc("i2", int(rng.random() < 0.6))
-        sro = diarrhee and tc("k4", int(rng.random() < 0.58)) == 1
-        zinc = diarrhee and tc("k5", int(rng.random() < 0.31)) == 1
-        recours = diarrhee and tc("k7", int(rng.random() < 0.63)) == 1
-        e4_intro = tc("e4_intro", int(age >= 4 or rng.random() < 0.4))
-        l = {f"l{k}": tc(f"l{k}", int(rng.random() < p_)) for k, p_ in zip(range(1, 9), [.85, .7, .6, .45, .5, .8, .7, .55])}
-        l["l2"] = tc("l2", ch([1, 1, 1, 2, 3, 9]))
-        score = sum(int(l[f"l{k}"] == 1) for k in range(1, 9))
+        f1 = ch([1, 2, 3, 7]) if eau_am else ch([4, 6, 9])
+        g1 = ch([1, 2, 3]) if rng.random() < 0.8 else ch([4, 5])
+        f8 = ch([1, 1, 2, 3, 4])
+        i1, i2 = int(rng.random() < 0.72), int(rng.random() < 0.6)
+        sro, zinc, recours = (diarrhee and rng.random() < 0.58), (diarrhee and rng.random() < 0.31), (diarrhee and rng.random() < 0.63)
+        e4_intro = int(age >= 4 or rng.random() < 0.4)
+        l = {f"l{k}": int(rng.random() < p_) for k, p_ in zip(range(1, 9), [.85, .7, .6, .45, .5, .8, .7, .55])}
+        l["l2"] = ch([1, 1, 1, 2, 3, 9])
+        score = sum([l["l1"], l["l2"] == 1, l["l3"], l["l4"], l["l5"], l["l6"], l["l7"], l["l8"]])
         signes = rng.sample(["boire", "vomissements", "sang", "fievre", "lethargie", "persistante"], rng.randint(0, 4))
-        d16 = tn("d16", rng.randint(1, 4), bornes=(1, 10))
-        d17 = tn("d17", rng.randint(2, 9), bornes=(1, 30))
-        t_sub = dt.datetime.combine(jour(i), dt.time(rng.randint(8, 17), rng.randint(0, 59)))
+        d16, d17 = rng.randint(1, 4), rng.randint(2, 9)
+        t_sub = dt.datetime.combine(debut + dt.timedelta(days=rng.randint(0, 21)), dt.time(rng.randint(8, 17), rng.randint(0, 59)))
         lignes.append({
-            "_id": 1000 + i, "_submission_time": t_sub, "a2": t_sub.date(), "_risque": risque,
-            "el1": 1, "el2": tn("el2", rng.randint(6, 240), ecart=3, bornes=(6, 600)), "el3": 1, "el4": 1, "eligible": 1,
-            "a3": enqueteur(aire, aire_i), "a4": aire, "a6": f"M{i:04d}",
-            "a7_gps": (None if rng.random() < 0.02 else "0 0 0 0" if rng.random() < 0.01 else geo.demo_gps(aire, rng)),
-            "a8": tn("a8", rng.randint(3, 12), ecart=1, bornes=(2, 30)), "a9": tn("a9", ch([1, 1, 2, 3]), bornes=(1, 8)),
-            "b1": sexe, "b2_connue": tc("b2_connue", 1), "b3": age, "b4": tc("b4", ch([1, 2, 2, 3])),
-            "b5": tn("b5", ch([1, 1, 2, 3, 4, 5]), bornes=(1, 12)),
-            "b6": tc("b6", ch([1, 1, 2, 3])), "b7": tc("b7", ch([1, 1, 1, 0, 9])),
-            "c1": tc("c1", ch([1, 1, 1, 1, 2, 3, 4])), "c2": rng.randint(16, 48), "c3": tc("c3", ch([0, 1, 2, 2, 2, 3])),
-            "c4": tc("c4", ch(range(1, 9))), "c5": tc("c5", ch([1, 2, 2, 2, 3, 4])),
-            "d1": tc("d1", int(rng.random() < .8)), "score_biens": tn("score_biens", rng.randint(1, 12), ecart=1, bornes=(0, 13)),
-            "d14": tc("d14", ch([1, 2, 2, 3])),
-            "d15": tc("d15", ch([1, 2, 2, 2, 3])), "d16": d16, "d17": d17, "promiscuite": round(d17 / d16, 1),
-            "d18": int(inond), "d19": tc("d19", ch([1, 2, 3])) if inond else None,
-            "d20": tc("d20", ch([1, 2, 3])) if inond else None,
-            "d21": tc("d21", int(rng.random() < 0.4)), "d22": tc("d22", ch([0, 1, 2])), "d23": tc("d23", ch([1, 2, 3, 4])),
-            "e1": tc("e1", 1), "e2": tc("e2", int(age < 20 and rng.random() < 0.8)), "e3": tc("e3", ch([1, 0, 0, 9])),
-            "e4_intro": e4_intro,
-            "e4": (tn("e4", rng.choice([2, 3, 4, 5, 6, 6, 7]), bornes=(0, 24)) if e4_intro == 1 else None),
-            "e5": tc("e5", ch([0, 0, 1, 2])), "e6": tc("e6", int(rng.random() < .6)),
-            "e7": tc("e7", ch([1, 2, 2, 3])),
-            "f1": f1, "f2": tc("f2", int(rng.random() < .5)), "f3": tc("f3", ch([0, 1, 2])), "f4": tc("f4", ch([1, 2, 3, 4])),
-            "f5": tc("f5", ch([1, 2, 3, 4, 5])),
-            "f6": tc("f6", int(rng.random() < .7)), "f7": tc("f7", ch([1, 2, 3, 4])), "f8": f8, "eau_amelioree": int(eau_am),
+            "_id": 1000 + i, "_submission_time": t_sub, "a2": t_sub.date(),
+            "el1": 1, "el2": rng.randint(6, 240), "el3": 1, "el4": 1, "eligible": 1,
+            "a3": f"ENQ{aire_i + 1:02d}", "a4": aire, "a6": f"M{i:04d}",
+            "a7_gps": (None if rng.random() < 0.02 else "0 0 0 0" if rng.random() < 0.01 else geo.demo_gps(aire, rng)), "a8": rng.randint(3, 12), "a9": ch([1, 1, 2, 3]),
+            "b1": sexe, "b2_connue": 1, "b3": age, "b4": ch([1, 2, 2, 3]), "b5": ch([1, 1, 2, 3, 4, 5]),
+            "b6": ch([1, 1, 2, 3]), "b7": ch([1, 1, 1, 0, 9]),
+            "c1": ch([1, 1, 1, 1, 2, 3, 4]), "c2": rng.randint(16, 48), "c3": ch([0, 1, 2, 2, 2, 3]),
+            "c4": ch(range(1, 9)), "c5": ch([1, 2, 2, 2, 3, 4]),
+            "d1": int(rng.random() < .8), "score_biens": rng.randint(1, 12), "d14": ch([1, 2, 2, 3]),
+            "d15": ch([1, 2, 2, 2, 3]), "d16": d16, "d17": d17, "promiscuite": round(d17 / d16, 1),
+            "d18": int(inond), "d19": ch([1, 2, 3]) if inond else None, "d20": ch([1, 2, 3]) if inond else None,
+            "d21": int(rng.random() < 0.4), "d22": ch([0, 1, 2]), "d23": ch([1, 2, 3, 4]),
+            "e1": 1, "e2": int(age < 20 and rng.random() < 0.8), "e3": ch([1, 0, 0, 9]), "e4_intro": e4_intro,
+            "e4": (rng.choice([2, 3, 4, 5, 6, 6, 7]) if e4_intro else None), "e5": ch([0, 0, 1, 2]), "e6": int(rng.random() < .6),
+            "e7": ch([1, 2, 2, 3]),
+            "f1": f1, "f2": int(rng.random() < .5), "f3": ch([0, 1, 2]), "f4": ch([1, 2, 3, 4]), "f5": ch([1, 2, 3, 4, 5]),
+            "f6": int(rng.random() < .7), "f7": ch([1, 2, 3, 4]), "f8": f8, "eau_amelioree": int(eau_am),
             "jmp_eau": ("Basique" if f8 in (1, 2) else "Limité") if eau_am else "Non amélioré",
-            "g1": g1, "g2": int(partage) if g1 != 5 else None, "g4": tc("g4", ch([1, 1, 2, 3, 4, 5])),
-            "g5": tc("g5", ch([0, 0, 1, 8])), "g6": tc("g6", ch([0, 1, 9])), "g7": tc("g7", ch([0, 1, 2, 8])),
+            "g1": g1, "g2": int(partage) if g1 != 5 else None, "g4": ch([1, 1, 2, 3, 4, 5]), "g5": ch([0, 0, 1, 8]),
+            "g6": ch([0, 1, 9]), "g7": ch([0, 1, 2, 8]),
             "jmp_assainissement": ("Basique" if not partage else "Limité") if g1 in (1, 2, 3) else ("Défécation en plein air" if g1 == 5 else "Non amélioré"),
-            "h1": tc("h1", ch([1, 2, 3, 3, 4, 5, 6])), "h2": tc("h2", int(rng.random() < .5)),
+            "h1": ch([1, 2, 3, 3, 4, 5, 6]), "h2": int(rng.random() < .5),
             "i1": i1, "i2": i2, "i3": int(savon),
-            "jmp_hygiene": ("Basique" if i2 == 1 and savon else "Limité") if i1 == 1 else "Aucun service",
+            "jmp_hygiene": ("Basique" if i2 and savon else "Limité") if i1 else "Aucun service",
             "i4": " ".join(rng.sample(["apres_toilettes", "apres_selles", "avant_preparation", "avant_manger", "avant_nourrir"], rng.randint(1, 4))),
-            "j1": int(diarrhee), "j2": tn("j2", rng.randint(1, 13), bornes=(0, 14)) if diarrhee else None,
-            "j3": tn("j3", ch([1, 2, 3, 4, 5, 7, 9, 15]), bornes=(1, 30)) if diarrhee else None,
-            "j4": tc("j4", ch([0, 0, 0, 1, 9])) if diarrhee else None, "j5": tc("j5", ch([0, 1, 9])) if diarrhee else None,
-            "j6": tc("j6", ch([0, 1])) if diarrhee else None,
-            "k1": tc("k1", ch([1, 2, 3, 4])) if diarrhee else None, "k2": tc("k2", ch([1, 2, 3, 4, 8])) if diarrhee else None,
-            "k3": tc("k3", ch([1, 1, 2, 3, 4])) if diarrhee else None, "k4": int(sro) if diarrhee else None,
-            "k5": int(zinc) if diarrhee else None,
+            "j1": int(diarrhee), "j2": rng.randint(1, 13) if diarrhee else None, "j3": ch([1, 2, 3, 4, 5, 7, 9, 15]) if diarrhee else None,
+            "j4": ch([0, 0, 0, 1, 9]) if diarrhee else None, "j5": ch([0, 1, 9]) if diarrhee else None, "j6": ch([0, 1]) if diarrhee else None,
+            "k1": ch([1, 2, 3, 4]) if diarrhee else None, "k2": ch([1, 2, 3, 4, 8]) if diarrhee else None,
+            "k3": ch([1, 1, 2, 3, 4]) if diarrhee else None, "k4": int(sro) if diarrhee else None, "k5": int(zinc) if diarrhee else None,
             "k6": ch([5, 10, 10, 14]) if zinc else None, "k7": int(recours) if diarrhee else None,
             "k8": ch([1, 2, 3, 4, 5, 6]) if recours else None, "k9": ch([1, 1, 2, 3, 4]) if recours else None,
             "k10": ("maladie_legere" if rng.random() < .5 else "argent domicile") if diarrhee and not recours else None,
@@ -457,19 +349,12 @@ def _simuler(n: int, graine: int, cal: dict | None, facteur: float) -> pd.DataFr
             "taille_final": round(taille, 1) if taille else None, "pb_final": pb, "m11": int(rng.random() < 0.01),
             "n2": 1,
         })
-    # fiches non éligibles ou refusées (bilan de participation), dans la proportion observée
-    part = (cal or {}).get("participation") or {}
-    motifs = part.get("non_eligibles") or {}
-    if part.get("eligibles") and sum(motifs.values()):
-        n_nonel = round(n * sum(motifs.values()) / part["eligibles"])
-        tirage = rng.choices(list(motifs), list(motifs.values()), k=n_nonel)
-    else:
-        tirage = [("hors_zone", "residence_courte", "sans_enfant", "refus")[j % 4] for j in range(38)]
-    for j, m in enumerate(tirage):
-        lignes.append({"_id": 5000 + j, "_risque": np.nan,
-                       "_submission_time": dt.datetime.combine(jour(rng.randrange(n)), dt.time(10)),
-                       "el1": 0 if m == "hors_zone" else 1, "el2": 3 if m == "residence_courte" else 24,
-                       "el3": 0 if m == "sans_enfant" else 1, "el4": 0 if m == "refus" else None, "eligible": 0})
+    # quelques fiches non éligibles ou refusées (bilan de participation)
+    for j in range(38):
+        cas = j % 4
+        lignes.append({"_id": 5000 + j, "_submission_time": dt.datetime.combine(debut + dt.timedelta(days=rng.randint(0, 21)), dt.time(10)),
+                       "el1": 0 if cas == 0 else 1, "el2": 3 if cas == 1 else 24, "el3": 0 if cas == 2 else 1,
+                       "el4": 0 if cas == 3 else None, "eligible": 0})
     df = pd.DataFrame(lignes)
     df["start"] = pd.to_datetime(df["_submission_time"]) - pd.to_timedelta([rng.randint(18, 45) for _ in range(len(df))], unit="m")
     df["end"] = pd.to_datetime(df["_submission_time"])
